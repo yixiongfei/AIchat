@@ -5,7 +5,7 @@ import { RoleEditor } from "./components/RoleEditor";
 import { ChatWindow } from "./components/ChatWindow";
 import { Role } from "./types";
 import { api } from "./services/api";
-import { MessageSquare, RefreshCw, Moon, Sun } from "lucide-react";
+import { RefreshCw, Moon, Sun } from "lucide-react";
 
 function App() {
   const [roles, setRoles] = useState<Role[]>([]);
@@ -13,15 +13,13 @@ function App() {
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // ✅ 抽屉开关
-  const [isChatOpen, setIsChatOpen] = useState(false);
-
   // 暗色模式：true=dark, false=light
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem("theme");
-    const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+    const prefersDark =
+      window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
     const shouldDark = saved ? saved === "dark" : prefersDark;
 
     setIsDark(shouldDark);
@@ -30,11 +28,6 @@ function App() {
     loadRoles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // ✅ 选择角色后：自动打开抽屉（你也可以注释掉这段，改为手动打开）
-  useEffect(() => {
-    if (selectedRole) setIsChatOpen(true);
-  }, [selectedRole]);
 
   const toggleTheme = () => {
     const next = !isDark;
@@ -67,12 +60,20 @@ function App() {
     }
   };
 
-  const handleCreateRole = async (roleData: { name: string; persona: string; human: string }) => {
+  const handleCreateRole = async (roleData: {
+    name: string;
+    persona: string;
+    human: string;
+  }) => {
     try {
       const newRole = await api.createRole(roleData);
       setRoles((prev) => [newRole, ...prev]);
       setSelectedRole(newRole);
+
+      // ✅ 保存成功后关闭编辑器
       setIsEditorOpen(false);
+
+      // ✅ 如你需要打开聊天（你现在 chat 没做抽屉逻辑也没关系）
       setIsChatOpen(true);
     } catch (error) {
       console.error("Failed to create role", error);
@@ -85,7 +86,9 @@ function App() {
       <div className="w-[18vw] shrink-0 flex flex-col border-r border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/40">
         {/* 顶部栏 */}
         <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-white dark:border-slate-800 dark:bg-slate-900">
-          <h1 className="font-bold text-xl text-blue-600 dark:text-blue-400">Letta Chat</h1>
+          <h1 className="font-bold text-xl text-blue-600 dark:text-blue-400">
+            Letta Chat
+          </h1>
 
           <div className="flex items-center gap-2">
             {/* 暗色切换按钮 */}
@@ -104,7 +107,9 @@ function App() {
               className={[
                 "p-2 rounded-full transition-colors",
                 "hover:bg-slate-100 dark:hover:bg-slate-800",
-                isSyncing ? "animate-spin text-blue-400" : "text-slate-600 dark:text-slate-300",
+                isSyncing
+                  ? "animate-spin text-blue-400"
+                  : "text-slate-600 dark:text-slate-300",
                 "disabled:opacity-60 disabled:cursor-not-allowed",
               ].join(" ")}
               title="Sync from Letta Cloud"
@@ -121,18 +126,16 @@ function App() {
           onCreateClick={() => setIsEditorOpen(true)}
         />
       </div>
-      
+
       {/* 右侧 ChatWindow：占满右侧（全高） */}
       <aside className="w-[82vw] shrink-0 h-screen border-l border-slate-800/60 bg-slate-950 text-slate-100">
         {selectedRole ? (
           <ChatWindow
             role={selectedRole}
             showHeader={true}
-
-            /* ✅ 外壳样式全部从 App 注入 */
             headerClassName="border-b border-slate-800/60 bg-slate-950/70 backdrop-blur sticky top-0 z-10"
             bodyClassName="bg-gradient-to-b from-slate-950 to-slate-950"
-            bodyInnerClassName="max-w-[1000px]"  // ✅ 你想更窄/更宽都在 App 控
+            bodyInnerClassName="max-w-[1000px]"
             inputBarClassName="border-t border-slate-800/60 bg-slate-950/70 backdrop-blur"
             inputClassName="
               bg-slate-900/60 text-slate-100 ring-1 ring-slate-700/50
@@ -143,11 +146,21 @@ function App() {
             assistantBubbleClassName="bg-slate-900/70 text-slate-100 ring-1 ring-slate-800"
           />
         ) : (
-          <div className="h-full flex items-center justify-center text-slate-400">请选择一个角色</div>
+          <div className="h-full flex items-center justify-center text-slate-400">
+            请选择一个角色
+          </div>
         )}
       </aside>
-      
+
+      {/* ✅ 关键：把 RoleEditor 真正渲染出来 */}
+      {isEditorOpen && (
+        <RoleEditor
+          onSave={handleCreateRole}
+          onClose={() => setIsEditorOpen(false)}
+        />
+      )}
     </div>
   );
 }
+
 export default App;

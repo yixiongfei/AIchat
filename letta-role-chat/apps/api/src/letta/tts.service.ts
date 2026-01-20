@@ -35,10 +35,9 @@ export async function textToSpeechFile(params: {
   const {
     text,
     voice = "shimmer",
-    speed = 1.25,
+    speed = 1.10,
     model = process.env.TTS_MODEL || "gpt-4o-mini-tts",
     format = (process.env.TTS_FORMAT as TTSFormat) || "mp3",
-    timeoutMs = 60_000,
     instructions = "请用健康、阳光、活泼的少女风格朗读。",
   } = params;
 
@@ -56,6 +55,8 @@ export async function textToSpeechFile(params: {
       voice: voice as any,
       input: text,
       response_format: format,
+      speed: speed,
+      instructions: instructions,
     });
 
     // 将响应流写入文件
