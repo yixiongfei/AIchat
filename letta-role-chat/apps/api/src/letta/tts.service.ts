@@ -27,15 +27,19 @@ export async function textToSpeechFile(params: {
   text: string;
   voice?: string;
   model?: string;
+  speed?: number;
   format?: TTSFormat;
   timeoutMs?: number;
+  instructions?: string;
 }): Promise<{ fileName: string; filePath: string; contentType: string }> {
   const {
     text,
-    voice = process.env.TTS_VOICE || "alloy",
-    model = process.env.TTS_MODEL || "tts-1",
+    voice = "shimmer",
+    speed = 1.25,
+    model = process.env.TTS_MODEL || "gpt-4o-mini-tts",
     format = (process.env.TTS_FORMAT as TTSFormat) || "mp3",
     timeoutMs = 60_000,
+    instructions = "请用健康、阳光、活泼的少女风格朗读。",
   } = params;
 
   if (!text?.trim()) {
