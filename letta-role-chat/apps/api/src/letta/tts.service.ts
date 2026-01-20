@@ -4,8 +4,10 @@ import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 
+// 强制使用标准 OpenAI 基础 URL 以避免代理不支持 TTS 的问题
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
+  baseURL: "https://api.openai.com/v1",
 });
 
 export type TTSFormat = "wav" | "mp3" | "opus" | "aac" | "flac";
@@ -40,30 +42,23 @@ export async function textToSpeechFile(params: {
     throw new Error("text is empty");
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const fileName = `${uuidv4()}.${format}`;
+  const filePath = path.join(TEMP_AUDIO_DIR, fileName);
 
   try {
-    const res = await openai.audio.speech.create(
-      {
-        model,
-        voice: voice as any,
-        input: text,
-        response_format: format,
-      },
-      { signal: controller.signal }
-    );
+    // 使用官方推荐的流式响应方式
+    const response = await openai.audio.speech.create({
+      model,
+      voice: voice as any,
+      input: text,
+      response_format: format,
+    });
 
-    const arrayBuffer = await res.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    
-    const fileName = `${uuidv4()}.${format}`;
-    const filePath = path.join(TEMP_AUDIO_DIR, fileName);
-    
-    fs.writeFileSync(filePath, buffer);
+    // 将响应流写入文件
+    const buffer = Buffer.from(await response.arrayBuffer());
+    await fs.promises.writeFile(filePath, buffer);
 
-    // 设置自动回收机制：30分钟后删除文件（防止泄露）
-    // 正常情况下前端播放完会调用删除接口，这里是兜底
+    // 设置自动回收机制：30分钟后删除文件
     setTimeout(() => {
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
@@ -76,8 +71,13 @@ export async function textToSpeechFile(params: {
       filePath, 
       contentType: formatToContentType(format) 
     };
-  } finally {
-    clearTimeout(timer);
+  } catch (error: any) {
+    console.error("OpenAI TTS Error:", error);
+    // 如果文件已创建但出错，尝试清理
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    throw error;
   }
 }
 
@@ -87,8 +87,13 @@ export async function textToSpeechFile(params: {
 export function deleteAudioFile(fileName: string) {
   const filePath = path.join(TEMP_AUDIO_DIR, fileName);
   if (fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
-    return true;
+    try {
+      fs.unlinkSync(filePath);
+      return true;
+    } catch (e) {
+      console.error(`Failed to delete file ${fileName}:`, e);
+      return false;
+    }
   }
   return false;
 }

@@ -1,14 +1,6 @@
+
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import http from 'http'
-
-const agent = new http.Agent({
-  keepAlive: true,
-  maxSockets: 50,      // 限制并发 socket
-  maxFreeSockets: 10,
-  timeout: 60000,
-})
-
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -18,14 +10,11 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/api': {
-        target: 'http://172.26.36.106:3000',
+        // 后端服务运行在 3001 端口，这里之前写错了
+        target: 'http://localhost:3001',
         changeOrigin: true,
-        configure(proxy) {
-                  proxy.on('proxyReq', (proxyReq) => {
-                    // @ts-ignore
-                    proxyReq.agent = agent
-                  })
-                },
+        // 移除复杂的 agent 配置，避免 ENOBUFS 错误
+        // ENOBUFS 通常是因为本地连接数过多或配置不当导致的
       },
     },
   },
