@@ -14,7 +14,7 @@ const HOST = process.env.HOST || "0.0.0.0"; // ✅ 可用环境变量控制
 
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
-app.use("/api/", tts);
+app.use("/api", tts);
 app.use("/api/roles", roleRoutes);
 app.use("/api/messages", messageRoutes);
 

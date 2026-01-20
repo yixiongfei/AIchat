@@ -1,29 +1,55 @@
 
-// server.ts (或 routes/tts.ts)
 import express from "express";
-import { textToSpeechBuffer } from "../letta/tts.service";
+import fs from "fs";
+import { textToSpeechFile, deleteAudioFile, getAudioFilePath } from "../letta/tts.service";
 
-const tts = express();
-tts.use(express.json({ limit: "1mb" }));
+const tts = express.Router();
 
+/**
+ * 请求 TTS 转换，返回音频文件名
+ */
 tts.post("/tts", async (req, res) => {
   try {
     const message: string = req.body?.message ?? "";
-    const format = (req.body?.format ?? "mp3") as any;
-
-    const { buffer, contentType } = await textToSpeechBuffer({
+    const voice = req.body?.voice;
+    
+    const { fileName } = await textToSpeechFile({
       text: message,
-      format,
-      // instructions: "Speak slowly and clearly in a friendly tone.",
+      voice,
     });
 
-    res.setHeader("Content-Type", contentType);
-    // 让浏览器可以直接播放或下载（二选一）
-    // res.setHeader("Content-Disposition", 'attachment; filename="tts.mp3"');
-    res.status(200).send(buffer);
+    res.status(200).json({ fileName });
   } catch (err: any) {
+    console.error("TTS Error:", err);
     const msg = err?.name === "AbortError" ? "TTS timeout" : (err?.message || "TTS error");
     res.status(500).json({ error: msg });
+  }
+});
+
+/**
+ * 获取音频文件流
+ */
+tts.get("/tts/audio/:fileName", (req, res) => {
+  const fileName = req.params.fileName;
+  const filePath = getAudioFilePath(fileName);
+
+  if (fs.existsSync(filePath)) {
+    res.sendFile(filePath);
+  } else {
+    res.status(404).json({ error: "Audio file not found" });
+  }
+});
+
+/**
+ * 播放完毕后删除音频文件
+ */
+tts.delete("/tts/audio/:fileName", (req, res) => {
+  const fileName = req.params.fileName;
+  const success = deleteAudioFile(fileName);
+  if (success) {
+    res.status(200).json({ message: "Deleted" });
+  } else {
+    res.status(404).json({ error: "File not found" });
   }
 });
 

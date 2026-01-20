@@ -14,7 +14,6 @@ const cn = (...classes: Array<string | false | null | undefined>) =>
 
 interface ChatWindowProps {
   role: Role;
-
   className?: string;
   headerClassName?: string;
   bodyClassName?: string;
@@ -22,13 +21,9 @@ interface ChatWindowProps {
   inputBarClassName?: string;
   inputClassName?: string;
   sendButtonClassName?: string;
-
   userBubbleClassName?: string;
   assistantBubbleClassName?: string;
-
   showHeader?: boolean;
-
-  /** 可选：默认是否开启自动朗读 */
   defaultAutoSpeak?: boolean;
 }
 
@@ -54,16 +49,11 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   /** ✅ TTS：自动朗读开关 */
   const [autoSpeak, setAutoSpeak] = useState(defaultAutoSpeak);
 
-  /** ✅ TTS：当前音频元素 + 当前 URL（播放完/停止都会 revoke） */
+  /** ✅ TTS：当前音频元素 */
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const audioUrlRef = useRef<string | null>(null);
+  const currentAudioFileRef = useRef<string | null>(null);
 
-  /** ✅ 取消正在进行的 TTS 请求 */
-  const ttsAbortRef = useRef<AbortController | null>(null);
-
-  // =========================
-  // 加载历史记录（保持你原逻辑）
-  // =========================
+  // 加载历史记录
   useEffect(() => {
     const loadHistory = async () => {
       setMessages([]);
@@ -90,55 +80,65 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       clearWaifuTimers();
       stopSpeak();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // =========================
-  // ✅ TTS：停止播放（停止音频 + abort 请求 + revoke URL）
+  // ✅ TTS：停止播放并清理
   // =========================
-  const stopSpeak = () => {
-    // abort in-flight fetch
-    if (ttsAbortRef.current) {
-      ttsAbortRef.current.abort();
-      ttsAbortRef.current = null;
-    }
-
-    // stop audio
-    const a = audioRef.current;
-    if (a) {
-      a.pause();
-      a.src = "";
+  const stopSpeak = async () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
       audioRef.current = null;
     }
 
-    // revoke blob url
-    if (audioUrlRef.current) {
-      URL.revokeObjectURL(audioUrlRef.current);
-      audioUrlRef.current = null;
+    if (currentAudioFileRef.current) {
+      const fileName = currentAudioFileRef.current;
+      currentAudioFileRef.current = null;
+      try {
+        await api.deleteAudio(fileName);
+      } catch (e) {
+        console.error("Failed to delete audio file:", e);
+      }
     }
   };
 
   // =========================
-  // ✅ TTS：调用 /api/tts，拿二进制音频并播放
+  // ✅ TTS：调用后端 TTS 并播放
   // =========================
   async function playTTS(message: string) {
-    const resp = await fetch("/api/tts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, format: "mp3" }),
-    });
+    try {
+      // 1. 先停止之前的播放
+      await stopSpeak();
 
-    const blob = await resp.blob();
-    const url = URL.createObjectURL(blob);
+      // 2. 请求后端生成语音
+      const resp = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
 
-    const audio = new Audio(url);
-    audio.play();
+      if (!resp.ok) throw new Error("TTS request failed");
+      
+      const { fileName } = await resp.json();
+      currentAudioFileRef.current = fileName;
 
-    audio.onended = () => URL.revokeObjectURL(url);
+      // 3. 播放音频
+      const audioUrl = `/api/tts/audio/${fileName}`;
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+      
+      audio.onended = () => {
+        stopSpeak(); // 播放完自动删除
+      };
+
+      await audio.play();
+    } catch (error) {
+      console.error("TTS Play Error:", error);
+    }
   }
 
   // =========================
-  // 发送消息（保持你原逻辑：sendMessageStream）
+  // 发送消息
   // =========================
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
@@ -192,7 +192,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           if (assistantContent.trim()) {
             showWaifuMessage(assistantContent, 8000, 10, true);
 
-            // ✅ 流式结束后朗读：改成调用 /api/tts 单次播放
+            // ✅ 流式结束后朗读
             if (autoSpeak) {
               await playTTS(assistantContent);
             }
@@ -216,11 +216,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               <div className="text-xs opacity-70">Online</div>
             </div>
 
-            {/* ✅ TTS 控件：自动朗读开关 + 停止 */}
             <div className="flex items-center gap-2 shrink-0">
               <button
                 onClick={() => setAutoSpeak((v) => !v)}
-                className="text-xs px-2 py-1 rounded-md ring-1 ring-current/20 opacity-80 hover:opacity-100 transition"
+                className={cn(
+                  "text-xs px-2 py-1 rounded-md ring-1 ring-current/20 transition",
+                  autoSpeak ? "bg-primary/10 opacity-100" : "opacity-60 hover:opacity-100"
+                )}
                 title="Auto Speak"
               >
                 {autoSpeak ? "自动朗读：开" : "自动朗读：关"}
@@ -228,7 +230,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
               <button
                 onClick={stopSpeak}
-                className="text-xs px-2 py-1 rounded-md ring-1 ring-current/20 opacity-80 hover:opacity-100 transition"
+                className="text-xs px-2 py-1 rounded-md ring-1 ring-current/20 opacity-60 hover:opacity-100 transition"
                 title="Stop"
               >
                 停止

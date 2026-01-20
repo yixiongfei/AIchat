@@ -27,6 +27,13 @@ export const api = {
     return res.json();
   },
 
+  // 删除音频文件
+  async deleteAudio(fileName: string) {
+    await fetch(`${API_BASE_URL}/tts/audio/${fileName}`, {
+      method: 'DELETE',
+    });
+  },
+
   // 流式消息发送
   async sendMessageStream(roleId: string, message: string, onChunk: (chunk: string) => void, onDone: () => void) {
     const response = await fetch(`${API_BASE_URL}/messages/${roleId}`, {
