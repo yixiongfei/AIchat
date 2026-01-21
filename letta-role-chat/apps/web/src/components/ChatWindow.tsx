@@ -114,7 +114,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       const resp = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ 
+          message,
+          voice: role.voice,
+          speed: role.speed,
+          pitch: role.pitch,
+          style: role.style
+        }),
       });
 
       if (!resp.ok) throw new Error("TTS request failed");

@@ -17,8 +17,8 @@ router.get("/", async (req, res) => {
 // 创建新角色
 router.post("/", async (req, res) => {
   try {
-    const { name, persona, human } = req.body;
-    const role = await agentService.createRole(name, persona, human);
+    const { name, persona, human, voice, speed, pitch, style } = req.body;
+    const role = await agentService.createRole(name, persona, human, voice, speed, pitch, style);
     res.status(201).json(role);
   } catch (error) {
     res.status(500).json({ error: "Failed to create role" });

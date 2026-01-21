@@ -4,6 +4,10 @@ export interface Role {
   persona: string;
   human: string;
   agentId?: string;
+  voice?: string;
+  speed?: number;
+  pitch?: string;
+  style?: string;
   createdAt: number;
 }
 

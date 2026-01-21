@@ -85,7 +85,7 @@ export const agentService = {
     }
   },
 
-  async createRole(name: string, persona: string, human: string) {
+  async createRole(name: string, persona: string, human: string, voice?: string, speed?: number, pitch?: string, style?: string) {
     const agent = await lettaClient.agents.create({
       name,
       memoryBlocks: [
@@ -99,11 +99,11 @@ export const agentService = {
     const id = uuidv4();
     const createdAt = Date.now();
     await pool.query(
-      "INSERT INTO agents (id, name, persona, human, agent_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-      [id, name, persona, human, agent.id, createdAt]
+      "INSERT INTO agents (id, name, persona, human, agent_id, voice, speed, pitch, style, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [id, name, persona, human, agent.id, voice || 'ja-JP-MayuNeural', speed || 1.0, pitch || '15', style || 'chat', createdAt]
     );
 
-    return { id, name, persona, human, agentId: agent.id, createdAt };
+    return { id, name, persona, human, agentId: agent.id, voice, speed, pitch, style, createdAt };
   },
 
   async listRoles() {
@@ -114,6 +114,10 @@ export const agentService = {
       persona: row.persona,
       human: row.human,
       agentId: row.agent_id,
+      voice: row.voice,
+      speed: row.speed,
+      pitch: row.pitch,
+      style: row.style,
       createdAt: row.created_at,
     }));
   },
@@ -128,6 +132,10 @@ export const agentService = {
       persona: row.persona,
       human: row.human,
       agentId: row.agent_id,
+      voice: row.voice,
+      speed: row.speed,
+      pitch: row.pitch,
+      style: row.style,
       createdAt: row.created_at,
     };
   },
