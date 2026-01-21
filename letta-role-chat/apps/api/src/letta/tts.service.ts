@@ -40,8 +40,8 @@ export async function textToSpeechFile(params: {
 }): Promise<{ fileName: string; filePath: string; contentType: string }> {
   const {
     text,
-    voice = "zh-CN-XiaoxiaoNeural",
-    speed = 1.1,
+    voice = "ja-JP-MayuNeural",
+    speed = 1.0,
     pitch = "15",
     style = "chat",
     format = (process.env.TTS_FORMAT as TTSFormat) || "mp3",

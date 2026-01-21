@@ -1,17 +1,20 @@
 
-import React, { useState } from "react";
+import React, { useId, useState } from "react";
 import { X } from "lucide-react";
 
+type RolePayload = {
+  name: string;
+  persona: string;
+  human: string;
+  voice: string;
+  speed: number;
+  pitch: string;
+  style: string;
+};
+
 interface RoleEditorProps {
-  onSave: (role: { 
-    name: string; 
-    persona: string; 
-    human: string;
-    voice: string;
-    speed: number;
-    pitch: string;
-    style: string;
-  }) => void;
+  // ✅ 允许 onSave 是 async（App 里你是 async）
+  onSave: (role: RolePayload) => void | Promise<void>;
   onClose: () => void;
 }
 
@@ -24,17 +27,27 @@ export const RoleEditor: React.FC<RoleEditorProps> = ({ onSave, onClose }) => {
   const [pitch, setPitch] = useState("15");
   const [style, setStyle] = useState("chat");
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // ✅ 为每个表单控件生成唯一 id，解决 axe/forms
+  const nameId = useId();
+  const personaId = useId();
+  const humanId = useId();
+  const voiceId = useId();
+  const speedId = useId();
+  const pitchId = useId();
+  const styleId = useId();
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // ✅ 调试：确认是否真的触发
     console.log("submit fired", { name, persona, human, voice, speed, pitch, style });
 
     try {
-      onSave({ name, persona, human, voice, speed, pitch, style });
-      onClose(); // ✅ 保存后关闭弹窗（你想要“点了有反应”通常就是这个）
+      // ✅ 等待保存完成，保存成功再关闭
+      await onSave({ name, persona, human, voice, speed, pitch, style });
+      onClose();
     } catch (err) {
       console.error("onSave error:", err);
+      // 这里你也可以加 toast/提示，避免“点了没反应”的感觉
     }
   };
 
@@ -44,7 +57,6 @@ export const RoleEditor: React.FC<RoleEditorProps> = ({ onSave, onClose }) => {
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-gray-800">Create New Agent</h2>
 
-          {/* ✅ 非提交按钮，一律 type="button" */}
           <button
             type="button"
             onClick={onClose}
@@ -57,71 +69,96 @@ export const RoleEditor: React.FC<RoleEditorProps> = ({ onSave, onClose }) => {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label
+              htmlFor={nameId}
+              className="block text-sm font-medium text-gray-700 mb-1"
+            >
               Agent Name
             </label>
             <input
+              id={nameId}
               required
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full border rounded-lg px-3 py-2 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full border rounded-lg px-3 py-2 text-black placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 outline-none"
               placeholder="e.g. Travel Assistant"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label
+              htmlFor={personaId}
+              className="block text-sm font-medium text-gray-700 mb-1"
+            >
               Persona (System Prompt)
             </label>
             <textarea
+              id={personaId}
               required
               rows={4}
               value={persona}
               onChange={(e) => setPersona(e.target.value)}
-              className="w-full border rounded-lg px-3 py-2 text-black focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+              className="w-full border rounded-lg px-3 py-2 text-black placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 outline-none resize-none"
               placeholder="Describe the agent's personality and role..."
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label
+              htmlFor={humanId}
+              className="block text-sm font-medium text-gray-700 mb-1"
+            >
               Human (User Context)
             </label>
             <textarea
+              id={humanId}
               required
               rows={2}
               value={human}
               onChange={(e) => setHuman(e.target.value)}
-              className="w-full border rounded-lg px-3 py-2 text-black focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+              className="w-full border rounded-lg px-3 py-2 text-black placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 outline-none resize-none"
               placeholder="Describe the user this agent is interacting with..."
             />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label
+                htmlFor={voiceId}
+                className="block text-sm font-medium text-gray-700 mb-1"
+              >
                 Voice
               </label>
               <input
+                id={voiceId}
                 type="text"
                 value={voice}
                 onChange={(e) => setVoice(e.target.value)}
-                className="w-full border rounded-lg px-3 py-2 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full border rounded-lg px-3 py-2 text-black placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 outline-none"
                 placeholder="ja-JP-MayuNeural"
               />
             </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label
+                htmlFor={speedId}
+                className="block text-sm font-medium text-gray-700 mb-1"
+              >
                 Speed
               </label>
               <input
+                id={speedId}
                 type="number"
                 step="0.1"
                 min="0.25"
                 max="4.0"
                 value={speed}
-                onChange={(e) => setSpeed(parseFloat(e.target.value))}
+                // ✅ valueAsNumber 更稳；避免 parseFloat('') => NaN
+                onChange={(e) => {
+                  const v = e.currentTarget.valueAsNumber;
+                  setSpeed(Number.isFinite(v) ? v : 1.0);
+                }}
                 className="w-full border rounded-lg px-3 py-2 text-black focus:ring-2 focus:ring-blue-500 outline-none"
               />
             </div>
@@ -129,26 +166,35 @@ export const RoleEditor: React.FC<RoleEditorProps> = ({ onSave, onClose }) => {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label
+                htmlFor={pitchId}
+                className="block text-sm font-medium text-gray-700 mb-1"
+              >
                 Pitch
               </label>
               <input
+                id={pitchId}
                 type="text"
                 value={pitch}
                 onChange={(e) => setPitch(e.target.value)}
-                className="w-full border rounded-lg px-3 py-2 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full border rounded-lg px-3 py-2 text-black placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 outline-none"
                 placeholder="15"
               />
             </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label
+                htmlFor={styleId}
+                className="block text-sm font-medium text-gray-700 mb-1"
+              >
                 Style
               </label>
               <input
+                id={styleId}
                 type="text"
                 value={style}
                 onChange={(e) => setStyle(e.target.value)}
-                className="w-full border rounded-lg px-3 py-2 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full border rounded-lg px-3 py-2 text-black placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 outline-none"
                 placeholder="chat"
               />
             </div>

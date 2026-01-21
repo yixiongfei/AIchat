@@ -19,7 +19,8 @@ tts.post("/tts", async (req, res) => {
       speed: speed ? parseFloat(speed) : undefined,
       // 注意：OpenAI TTS SDK 可能不支持 pitch 和 style，
       // 但我们可以将其作为 instructions 的一部分或保留以备后用
-      instructions: style ? `Style: ${style}. Pitch: ${pitch}.` : undefined,
+      pitch: pitch ? `Pitch: ${pitch}.` : undefined,
+      style: style ? `Style: ${style}.` : undefined,
     });
 
     res.status(200).json({ fileName });

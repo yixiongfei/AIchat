@@ -72,9 +72,6 @@ function App() {
 
       // ✅ 保存成功后关闭编辑器
       setIsEditorOpen(false);
-
-      // ✅ 如你需要打开聊天（你现在 chat 没做抽屉逻辑也没关系）
-      setIsChatOpen(true);
     } catch (error) {
       console.error("Failed to create role", error);
     }
