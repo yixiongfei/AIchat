@@ -12,15 +12,16 @@ tts.post("/tts", async (req, res) => {
   try {
     const message: string = req.body?.message ?? "";
     const { voice, speed, pitch, style } = req.body;
+    console.log("req.body =", req.body); 
     
     const { fileName } = await textToSpeechFile({
       text: message,
       voice,
-      speed: speed ? parseFloat(speed) : undefined,
-      // 注意：OpenAI TTS SDK 可能不支持 pitch 和 style，
-      // 但我们可以将其作为 instructions 的一部分或保留以备后用
-      pitch: pitch ? `Pitch: ${pitch}.` : undefined,
-      style: style ? `Style: ${style}.` : undefined,
+      // 支持前端传 string 或 number
+      speed: typeof speed === "string" ? parseFloat(speed) : typeof speed === "number" ? speed : undefined,
+      // 不再包装为 `Pitch: ...` / `Style: ...`，直接传原始值
+      pitch: pitch ?? undefined,
+      style: style ?? undefined,
     });
 
     res.status(200).json({ fileName });

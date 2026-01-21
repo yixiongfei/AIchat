@@ -68,10 +68,6 @@ export const RoleList: React.FC<RoleListProps> = ({
                 >
                   {role.name}
                 </p>
-
-                <p className="text-xs truncate text-slate-500 dark:text-slate-400">
-                  {role.persona}
-                </p>
               </div>
             </button>
           );

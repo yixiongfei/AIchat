@@ -1,62 +1,117 @@
-
 import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
-
 export type TTSFormat = "wav" | "mp3" | "opus" | "aac" | "flac";
+import {agentService} from "./agent.service";
+// ======= 1) 默认值集中管理（硬编码兜底） =======
+const DEFAULT_TTS = {
+  voice: "ja-JP-MayuNeural",
+  speed: 1.0,
+  pitch: "10",
+  style: "chat",
+} as const;
 
-// 语音文件暂存目录
-const TEMP_AUDIO_DIR = path.join(process.cwd(), "temp_audio");
+/**
+ * ✅ 建议：允许用环境变量固定目录，避免 cwd 漂移
+ */
+const TEMP_AUDIO_DIR =
+  process.env.TEMP_AUDIO_DIR || path.resolve(process.cwd(), "temp_audio");
 
-// 确保目录存在
-if (!fs.existsSync(TEMP_AUDIO_DIR)) {
-  fs.mkdirSync(TEMP_AUDIO_DIR, { recursive: true });
+async function ensureTempDir() {
+  await fs.promises.mkdir(TEMP_AUDIO_DIR, { recursive: true });
 }
 
-/**
- * Worker TTS API 地址
- * 例如：https://your-worker.workers.dev/v1/audio/speech
- */
 const WORKER_TTS_URL =
-  process.env.WORKER_TTS_URL || "https://tts-voice-magic.yixiongfei1785.workers.dev/v1/audio/speech";
+  process.env.WORKER_TTS_URL ||
+  "https://tts-voice-magic.yixiongfei1785.workers.dev/v1/audio/speech";
 
-/**
- * 可选：如果你的 worker 需要鉴权，在环境变量里设置
- * WORKER_TTS_API_KEY=xxx
- */
 const WORKER_TTS_API_KEY = process.env.WORKER_TTS_API_KEY;
 
-/**
- * 把文本转换为音频并保存到本地文件（通过 Worker API）
- */
+// ======= 2) 从 DB 读取 agent 配置，并与默认值合并 =======
+async function resolveAgentTTSConfig(params: {
+  agentId?: string;
+  voice?: string;
+  speed?: number;
+  pitch?: string;
+  style?: string;
+}) {
+  const { agentId } = params;
+
+  let agentCfg: Partial<typeof DEFAULT_TTS> = {};
+
+  // ✅ 只有传了 agentId 才查 DB
+  if (agentId) {
+    try {
+      const agent = await agentService.getRole(agentId);
+      if (agent) {
+        agentCfg = {
+          voice: agent.voice ?? undefined,
+          speed: agent.speed ?? undefined,
+          pitch: agent.pitch ?? undefined,
+          style: agent.style ?? undefined,
+        };
+      }
+      // agent 为 null：自动回退到 env/默认值
+    } catch (e) {
+      // DB 出错不阻断 TTS：降级
+      console.warn("[TTS] load agent config failed, fallback:", e);
+    }
+  }
+
+  // ✅ 合并优先级：调用参数 > DB > ENV > DEFAULT
+  const merged = {
+    voice: params.voice ?? agentCfg.voice ?? DEFAULT_TTS.voice,
+    speed: params.speed ?? agentCfg.speed ?? DEFAULT_TTS.speed,
+    pitch: params.pitch ?? agentCfg.pitch ?? DEFAULT_TTS.pitch,
+    style: params.style ?? agentCfg.style ?? DEFAULT_TTS.style,
+  };
+
+  // ✅ speed 防御：无效则回退
+  if (!Number.isFinite(merged.speed) || merged.speed <= 0) {
+    merged.speed = DEFAULT_TTS.speed;
+  }
+
+  return merged;
+}
+
 export async function textToSpeechFile(params: {
   text: string;
-  voice?: string;     // e.g. zh-CN-XiaoxiaoNeural
-  speed?: number;     // e.g. 1.0
-  pitch?: string;     // e.g. "0"
-  style?: string;     // e.g. "general"
-  format?: TTSFormat; // mp3/wav...
+
+  // ✅ 新增：用于从 agents 表加载默认 voice/speed/pitch/style
+  agentId?: string;
+
+  // 仍然允许显式覆盖
+  voice?: string;
+  speed?: number;
+  pitch?: string;
+  style?: string;
+
+  format?: TTSFormat;
   timeoutMs?: number;
 }): Promise<{ fileName: string; filePath: string; contentType: string }> {
   const {
     text,
-    voice = "ja-JP-MayuNeural",
-    speed = 1.0,
-    pitch = "15",
-    style = "chat",
+    agentId,
     format = (process.env.TTS_FORMAT as TTSFormat) || "mp3",
     timeoutMs = 60_000,
   } = params;
 
-  if (!text?.trim()) {
-    throw new Error("text is empty");
-  }
+  if (!text?.trim()) throw new Error("text is empty");
 
-  // 先生成文件名（后缀先按 format，后面也会根据 content-type 纠正）
+  await ensureTempDir();
+
+  // ✅ 统一解析最终使用的 voice/speed/pitch/style
+  const { voice, speed, pitch, style } = await resolveAgentTTSConfig({
+    agentId,
+    voice: params.voice,
+    speed: params.speed,
+    pitch: params.pitch,
+    style: params.style,
+  });
+
   let fileName = `${uuidv4()}.${format}`;
   let filePath = path.join(TEMP_AUDIO_DIR, fileName);
 
-  // 超时控制
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -64,65 +119,57 @@ export async function textToSpeechFile(params: {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
+    if (WORKER_TTS_API_KEY) headers["Authorization"] = `Bearer ${WORKER_TTS_API_KEY}`;
 
-    // 如果 worker 需要鉴权（可选）
-    if (WORKER_TTS_API_KEY) {
-      headers["Authorization"] = `Bearer ${WORKER_TTS_API_KEY}`;
-    }
+    const payload = { input: text, voice, speed, pitch, style, format };
+    console.log("[TTS] Sending payload to worker:", payload);
 
     const resp = await fetch(WORKER_TTS_URL, {
       method: "POST",
       headers,
-      body: JSON.stringify({
-        input: text,
-        voice,
-        speed,
-        pitch,
-        style,
-        // 如果你的 worker 支持 format 参数，可以传上（不支持也没关系）
-        format,
-      }),
+      body: JSON.stringify(payload),
       signal: controller.signal,
     });
 
-    // 如果不是 2xx，尽量把错误信息读出来（可能是 JSON 或文本）
     if (!resp.ok) {
       const ct = resp.headers.get("content-type") || "";
-      let detail = "";
-      try {
-        if (ct.includes("application/json")) {
-          detail = JSON.stringify(await resp.json());
-        } else {
-          detail = await resp.text();
-        }
-      } catch {
-        detail = "(failed to read error body)";
-      }
+      const detail = ct.includes("application/json")
+        ? JSON.stringify(await resp.json())
+        : await resp.text();
       throw new Error(`Worker TTS Error: ${resp.status} ${resp.statusText} ${detail}`);
     }
 
-    // 读取音频二进制
-    const arrayBuffer = await resp.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    // 从响应头拿 Content-Type（更可靠）
+    const buffer = Buffer.from(await resp.arrayBuffer());
     const contentType = resp.headers.get("content-type") || formatToContentType(format);
 
-    // 根据 content-type 自动修正后缀（可选但推荐）
+    // 根据 content-type 自动修正后缀（可选）
     const extByCT = contentTypeToExt(contentType);
     if (extByCT && !fileName.endsWith(`.${extByCT}`)) {
-      // 换个后缀名保存，避免 mp3 实际返回 wav 导致播放器识别错
       fileName = `${uuidv4()}.${extByCT}`;
       filePath = path.join(TEMP_AUDIO_DIR, fileName);
     }
 
-    await fs.promises.writeFile(filePath, buffer);
+    await ensureTempDir();
 
-    // 设置自动回收机制：30分钟后删除文件
+    try {
+      await fs.promises.writeFile(filePath, buffer);
+    } catch (err: any) {
+      if (err?.code === "ENOENT") {
+        await ensureTempDir();
+        await fs.promises.writeFile(filePath, buffer);
+      } else {
+        throw err;
+      }
+    }
+
     setTimeout(() => {
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-        console.log(`Auto-cleaned expired audio file: ${fileName}`);
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          console.log(`Auto-cleaned expired audio file: ${fileName}`);
+        }
+      } catch (e) {
+        console.warn("Auto-clean failed:", e);
       }
     }, 30 * 60 * 1000);
 
@@ -130,19 +177,16 @@ export async function textToSpeechFile(params: {
   } catch (error: any) {
     console.error("Worker TTS Error:", error);
 
-    // 如果文件已创建但出错，尝试清理
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
+    try {
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch {}
+
     throw error;
   } finally {
     clearTimeout(timer);
   }
 }
 
-/**
- * 删除指定的音频文件
- */
 export function deleteAudioFile(fileName: string) {
   const filePath = path.join(TEMP_AUDIO_DIR, fileName);
   if (fs.existsSync(filePath)) {
@@ -157,9 +201,6 @@ export function deleteAudioFile(fileName: string) {
   return false;
 }
 
-/**
- * 获取音频文件路径
- */
 export function getAudioFilePath(fileName: string) {
   return path.join(TEMP_AUDIO_DIR, fileName);
 }
