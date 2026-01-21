@@ -7,6 +7,7 @@ import messageRoutes from "./routes/messages";
 import { initDb } from "./storage/db";
 import "dotenv/config";
 import tts from "./routes/tts";
+import path from "path";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
@@ -15,6 +16,9 @@ const HOST = process.env.HOST || "0.0.0.0"; // ✅ 可用环境变量控制
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 app.use("/api", tts);
+// 静态托管 avatar 上传目录
+const avatarsDir = process.env.AVATAR_DIR || path.resolve(process.cwd(), "uploads", "avatars");
+app.use('/avatars', express.static(avatarsDir));
 app.use("/api/roles", roleRoutes);
 app.use("/api/messages", messageRoutes);
 

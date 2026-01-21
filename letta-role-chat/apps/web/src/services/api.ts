@@ -1,9 +1,14 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://172.26.36.106:3001/api';
+const API_BASE_URL = 'http://172.26.36.106:3001/api';
 
 export const api = {
   async getRoles() {
     const res = await fetch(`${API_BASE_URL}/roles`);
-    return res.json();
+    const data = await res.json();
+    // 将 avatar 文件名转换为完整 URL
+    return data.map((r: any) => ({
+      ...r,
+      avatar: r.avatar ? `${API_BASE_URL.replace(/\/api$/, '')}/avatars/${r.avatar}` : undefined,
+    }));
   },
 
   async createRole(role: { 
@@ -14,9 +19,28 @@ export const api = {
     speed?: number;
     pitch?: string;
     style?: string;
+    avatarBase64?: string;
   }) {
     const res = await fetch(`${API_BASE_URL}/roles`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(role),
+    });
+    return res.json();
+  },
+
+  async updateRole(roleId: string, role: { 
+    name?: string; 
+    persona?: string; 
+    human?: string;
+    voice?: string;
+    speed?: number;
+    pitch?: string;
+    style?: string;
+    avatarBase64?: string | undefined;
+  }) {
+    const res = await fetch(`${API_BASE_URL}/roles/${roleId}`, {
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(role),
     });
@@ -32,6 +56,13 @@ export const api = {
 
   async getHistory(roleId: string) {
     const res = await fetch(`${API_BASE_URL}/roles/${roleId}/history`);
+    return res.json();
+  },
+
+  async deleteHistory(roleId: string) {
+    const res = await fetch(`${API_BASE_URL}/messages/${roleId}`, {
+      method: 'DELETE',
+    });
     return res.json();
   },
 

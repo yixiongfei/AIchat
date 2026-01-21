@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Role } from '../types';
 import { UserCircle, Plus } from 'lucide-react';
 
@@ -8,6 +8,7 @@ interface RoleListProps {
   selectedRoleId?: string;
   onSelectRole: (role: Role) => void;
   onCreateClick: () => void;
+  onEditRole?: (role: Role) => void;
 }
 
 export const RoleList: React.FC<RoleListProps> = ({
@@ -15,7 +16,9 @@ export const RoleList: React.FC<RoleListProps> = ({
   selectedRoleId,
   onSelectRole,
   onCreateClick,
+  onEditRole,
 }) => {
+  const [failedAvatars, setFailedAvatars] = useState<Record<string, boolean>>({});
   return (
     <div className="h-full flex flex-col bg-slate-50 text-slate-900 dark:bg-slate-900/40 dark:text-slate-100">
       {/* Header */}
@@ -40,23 +43,27 @@ export const RoleList: React.FC<RoleListProps> = ({
           const active = selectedRoleId === role.id;
 
           return (
-            <button
-              key={role.id}
-              onClick={() => onSelectRole(role)}
-              className={[
-                'w-full text-left px-4 py-3 flex items-center gap-3',
-                'transition-colors rounded-xl mx-2',
-                'hover:bg-slate-100 dark:hover:bg-slate-800/60',
-              ].join(' ')}
+            <div key={role.id} className="w-full flex items-center justify-between">
+              <button
+                onClick={() => onSelectRole(role)}
+                className={[
+                  'w-full text-left px-4 py-3 flex items-center gap-3',
+                  'transition-colors rounded-xl mx-2',
+                  'hover:bg-slate-100 dark:hover:bg-slate-800/60',
+                ].join(' ')}
             >
               {/* Icon / Avatar */}
               <div className="shrink-0">
-                <UserCircle
-                  size={34}
-                  className={[
-                    'text-slate-400',
-                  ].join(' ')}
-                />
+                {role.avatar && !failedAvatars[role.id] ? (
+                  <img
+                    src={role.avatar}
+                    alt={role.name}
+                    className="h-8 w-8 rounded-full object-cover"
+                    onError={() => setFailedAvatars((s) => ({ ...s, [role.id]: true }))}
+                  />
+                ) : (
+                  <UserCircle size={34} className={['text-slate-400'].join(' ')} />
+                )}
               </div>
 
               {/* Text */}
@@ -69,7 +76,18 @@ export const RoleList: React.FC<RoleListProps> = ({
                   {role.name}
                 </p>
               </div>
-            </button>
+              </button>
+              <div className="pr-2">
+                <button
+                  onClick={() => onEditRole?.(role)}
+                  className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800/60"
+                  title="Edit"
+                >
+                  {/* simple pencil icon using SVG */}
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-500"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+                </button>
+              </div>
+            </div>
           );
         })}
 

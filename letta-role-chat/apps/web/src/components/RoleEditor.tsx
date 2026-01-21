@@ -1,5 +1,5 @@
 
-import React, { useId, useState } from "react";
+import React, { useId, useState, useEffect } from "react";
 import { X } from "lucide-react";
 
 type RolePayload = {
@@ -10,15 +10,18 @@ type RolePayload = {
   speed: number;
   pitch: string;
   style: string;
+  avatarBase64?: string | null;
 };
 
 interface RoleEditorProps {
   // ✅ 允许 onSave 是 async（App 里你是 async）
   onSave: (role: RolePayload) => void | Promise<void>;
+  // 可选的初始角色（用于编辑）
+  initialRole?: any;
   onClose: () => void;
 }
 
-export const RoleEditor: React.FC<RoleEditorProps> = ({ onSave, onClose }) => {
+export const RoleEditor: React.FC<RoleEditorProps> = ({ onSave, onClose, initialRole }) => {
   const [name, setName] = useState("");
   const [persona, setPersona] = useState("");
   const [human, setHuman] = useState("");
@@ -26,6 +29,22 @@ export const RoleEditor: React.FC<RoleEditorProps> = ({ onSave, onClose }) => {
   const [speed, setSpeed] = useState(1.0);
   const [pitch, setPitch] = useState("15");
   const [style, setStyle] = useState("chat");
+  const [avatarBase64, setAvatarBase64] = useState<string | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+
+  // 如果提供了 initialRole，则用于编辑模式，预填表单
+  useEffect(() => {
+    if (!initialRole) return;
+    setName(initialRole.name || "");
+    setPersona(initialRole.persona || "");
+    setHuman(initialRole.human || "");
+    setVoice(initialRole.voice || "ja-JP-MayuNeural");
+    setSpeed(typeof initialRole.speed === 'number' ? initialRole.speed : 1.0);
+    setPitch(initialRole.pitch || "15");
+    setStyle(initialRole.style || "chat");
+    // initialRole.avatar is a URL; show as preview
+    if (initialRole.avatar) setAvatarPreview(initialRole.avatar);
+  }, [initialRole]);
 
   // ✅ 为每个表单控件生成唯一 id，解决 axe/forms
   const nameId = useId();
@@ -35,6 +54,7 @@ export const RoleEditor: React.FC<RoleEditorProps> = ({ onSave, onClose }) => {
   const speedId = useId();
   const pitchId = useId();
   const styleId = useId();
+  const avatarId = useId();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,7 +63,7 @@ export const RoleEditor: React.FC<RoleEditorProps> = ({ onSave, onClose }) => {
 
     try {
       // ✅ 等待保存完成，保存成功再关闭
-      await onSave({ name, persona, human, voice, speed, pitch, style });
+      await onSave({ name, persona, human, voice, speed, pitch, style, avatarBase64 });
       onClose();
     } catch (err) {
       console.error("onSave error:", err);
@@ -55,7 +75,7 @@ export const RoleEditor: React.FC<RoleEditorProps> = ({ onSave, onClose }) => {
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl w-full max-w-md p-6 shadow-2xl">
         <div className="flex justify-between items-center mb-6">
-          <h2 className="text-xl font-bold text-gray-800">Create New Agent</h2>
+          <h2 className="text-xl font-bold text-gray-800">{initialRole ? 'Edit Agent' : 'Create New Agent'}</h2>
 
           <button
             type="button"
@@ -99,7 +119,9 @@ export const RoleEditor: React.FC<RoleEditorProps> = ({ onSave, onClose }) => {
               rows={4}
               value={persona}
               onChange={(e) => setPersona(e.target.value)}
-              className="w-full border rounded-lg px-3 py-2 text-black placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+              readOnly={!!initialRole}
+              title={initialRole ? 'Persona cannot be edited in edit mode' : undefined}
+              className={`w-full border rounded-lg px-3 py-2 text-black placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 outline-none resize-none ${initialRole ? 'bg-slate-50 cursor-not-allowed' : ''}`}
               placeholder="Describe the agent's personality and role..."
             />
           </div>
@@ -117,7 +139,9 @@ export const RoleEditor: React.FC<RoleEditorProps> = ({ onSave, onClose }) => {
               rows={2}
               value={human}
               onChange={(e) => setHuman(e.target.value)}
-              className="w-full border rounded-lg px-3 py-2 text-black placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+              readOnly={!!initialRole}
+              title={initialRole ? 'User Context cannot be edited in edit mode' : undefined}
+              className={`w-full border rounded-lg px-3 py-2 text-black placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 outline-none resize-none ${initialRole ? 'bg-slate-50 cursor-not-allowed' : ''}`}
               placeholder="Describe the user this agent is interacting with..."
             />
           </div>
@@ -164,6 +188,31 @@ export const RoleEditor: React.FC<RoleEditorProps> = ({ onSave, onClose }) => {
             </div>
           </div>
 
+          <div>
+            <label htmlFor={avatarId} className="block text-sm font-medium text-gray-700 mb-1">Avatar (optional)</label>
+            <input
+              id={avatarId}
+              type="file"
+              accept="image/*"
+              title="Upload avatar"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const res = reader.result as string;
+                  setAvatarBase64(res);
+                  setAvatarPreview(res);
+                };
+                reader.readAsDataURL(f);
+              }}
+              className="w-full"
+            />
+            {avatarPreview && (
+              <img src={avatarPreview} alt="avatar preview" className="mt-2 h-20 w-20 rounded-md object-cover" />
+            )}
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label
@@ -204,7 +253,7 @@ export const RoleEditor: React.FC<RoleEditorProps> = ({ onSave, onClose }) => {
             type="submit"
             className="w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 transition-colors mt-4"
           >
-            Create Agent
+            {initialRole ? 'Save Changes' : 'Create Agent'}
           </button>
         </form>
       </div>

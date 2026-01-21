@@ -26,6 +26,7 @@ export const initDb = async () => {
         persona TEXT,
         human TEXT,
         agent_id VARCHAR(255) UNIQUE,
+        avatar VARCHAR(255) DEFAULT NULL,
         voice VARCHAR(255) DEFAULT 'ja-JP-MayuNeural',
         speed FLOAT DEFAULT 1.0,
         pitch VARCHAR(50) DEFAULT '15',

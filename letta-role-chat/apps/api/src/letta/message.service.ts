@@ -6,6 +6,13 @@ function normalizeBaseUrl(url: string) {
   return url.replace(/\/$/, "");
 }
 
+// 将用户输入用不可混淆的边界包起来，防止提示词注入
+function wrapUserInput(input: string) {
+  const start = "<<<USER_INPUT_START>>>";
+  const end = "<<<USER_INPUT_END>>>";
+  return `${start}\n${input}\n${end}`;
+}
+
 export const messageService = {
   async sendMessageStream(roleId: string, agentId: string, text: string, res: Response) {
     // SSE headers
@@ -26,6 +33,9 @@ export const messageService = {
 
       const url = `${baseUrl}/v1/agents/${agentId}/messages/stream`;
 
+      // 给 Letta 的请求使用包装后的用户输入（数据库仍保存原始文本）
+      const wrapped = wrapUserInput(text);
+
       const upstream = await fetch(url, {
         method: "POST",
         headers: {
@@ -33,7 +43,7 @@ export const messageService = {
           ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
         },
         body: JSON.stringify({
-          messages: [{ role: "user", content: text }],
+          messages: [{ role: "user", content: wrapped }],
           stream_tokens: true,
         }),
       });
@@ -102,5 +112,18 @@ export const messageService = {
       content: row.content,
       timestamp: row.timestamp
     }));
+  }
+  ,
+  async deleteHistory(agentId: string) {
+    try {
+      const [result]: any = await pool.query('DELETE FROM messages WHERE agent_id = ?', [agentId]);
+      // result.affectedRows or result.affected may vary by driver
+      const deleted = result?.affectedRows ?? result?.affected ?? 0;
+      console.log(`[Message] Deleted ${deleted} messages for agent ${agentId}`);
+      return { success: true, deleted };
+    } catch (e) {
+      console.error("Failed to delete history:", e);
+      throw e;
+    }
   }
 };

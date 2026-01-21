@@ -2,6 +2,8 @@
 import { lettaClient } from "./client";
 import pool from "../storage/db";
 import { v4 as uuidv4 } from "uuid";
+import fs from "fs";
+import path from "path";
 
 type MemoryBlock = { label: string; value?: string | null };
 type CloudAgent = {
@@ -85,7 +87,7 @@ export const agentService = {
     }
   },
 
-  async createRole(name: string, persona: string, human: string, voice?: string, speed?: number, pitch?: string, style?: string) {
+  async createRole(name: string, persona: string, human: string, voice?: string, speed?: number, pitch?: string, style?: string, avatarBase64?: string) {
     const agent = await lettaClient.agents.create({
       name,
       memoryBlocks: [
@@ -98,12 +100,33 @@ export const agentService = {
 
     const id = uuidv4();
     const createdAt = Date.now();
+    // 如果提供了 avatar 的 base64 数据，则写入文件并保存文件名
+    let avatarFileName: string | null = null;
+    try {
+      if (avatarBase64 && typeof avatarBase64 === "string") {
+        const m = avatarBase64.match(/^data:(image\/(png|jpeg|jpg|gif));base64,(.+)$/);
+        if (m) {
+          const mime = m[1];
+          const ext = m[2] === "jpeg" ? "jpg" : m[2];
+          const b64 = m[3];
+          const uploadsDir = process.env.AVATAR_DIR || path.resolve(process.cwd(), "uploads", "avatars");
+          await fs.promises.mkdir(uploadsDir, { recursive: true });
+          avatarFileName = `${uuidv4()}.${ext}`;
+          const filePath = path.join(uploadsDir, avatarFileName);
+          await fs.promises.writeFile(filePath, Buffer.from(b64, "base64"));
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to save avatar, continuing without avatar", e);
+      avatarFileName = null;
+    }
+
     await pool.query(
-      "INSERT INTO agents (id, name, persona, human, agent_id, voice, speed, pitch, style, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [id, name, persona, human, agent.id, voice || 'ja-JP-MayuNeural', speed || 1.0, pitch || '15', style || 'chat', createdAt]
+      "INSERT INTO agents (id, name, persona, human, agent_id, avatar, voice, speed, pitch, style, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [id, name, persona, human, agent.id, avatarFileName, voice || "ja-JP-MayuNeural", speed || 1.0, pitch || "15", style || "chat", createdAt]
     );
 
-    return { id, name, persona, human, agentId: agent.id, voice, speed, pitch, style, createdAt };
+    return { id, name, persona, human, agentId: agent.id, avatar: avatarFileName, voice, speed, pitch, style, createdAt };
   },
 
   async listRoles() {
@@ -114,6 +137,7 @@ export const agentService = {
       persona: row.persona,
       human: row.human,
       agentId: row.agent_id,
+      avatar: row.avatar,
       voice: row.voice,
       speed: row.speed,
       pitch: row.pitch,
@@ -132,11 +156,59 @@ export const agentService = {
       persona: row.persona,
       human: row.human,
       agentId: row.agent_id,
+      avatar: row.avatar,
       voice: row.voice,
       speed: row.speed,
       pitch: row.pitch,
       style: row.style,
       createdAt: row.created_at,
     };
+  },
+  async updateRole(id: string, data: { name?: string; persona?: string; human?: string; voice?: string; speed?: number; pitch?: string; style?: string; avatarBase64?: string | null }) {
+    // 读取当前记录
+    const role = await this.getRole(id);
+    if (!role) throw new Error('Role not found');
+
+    // 处理 avatarBase64 替换（如果提供）
+    let avatarFileName: string | null | undefined = role.avatar;
+    try {
+      if (data.avatarBase64 && typeof data.avatarBase64 === 'string') {
+        const m = data.avatarBase64.match(/^data:(image\/(png|jpeg|jpg|gif));base64,(.+)$/);
+        if (m) {
+          const ext = m[2] === 'jpeg' ? 'jpg' : m[2];
+          const b64 = m[3];
+          const uploadsDir = process.env.AVATAR_DIR || path.resolve(process.cwd(), 'uploads', 'avatars');
+          await fs.promises.mkdir(uploadsDir, { recursive: true });
+          const newFile = `${uuidv4()}.${ext}`;
+          const filePath = path.join(uploadsDir, newFile);
+          await fs.promises.writeFile(filePath, Buffer.from(b64, 'base64'));
+          // 可选：删除旧文件
+          if (avatarFileName) {
+            try { fs.unlinkSync(path.join(uploadsDir, avatarFileName)); } catch {}
+          }
+          avatarFileName = newFile;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to save avatar during update, keeping old avatar', e);
+    }
+
+    const updates: any[] = [];
+    const params: any[] = [];
+    if (data.name !== undefined) { updates.push('name = ?'); params.push(data.name); }
+    if (data.persona !== undefined) { updates.push('persona = ?'); params.push(data.persona); }
+    if (data.human !== undefined) { updates.push('human = ?'); params.push(data.human); }
+    if (data.voice !== undefined) { updates.push('voice = ?'); params.push(data.voice); }
+    if (data.speed !== undefined) { updates.push('speed = ?'); params.push(data.speed); }
+    if (data.pitch !== undefined) { updates.push('pitch = ?'); params.push(data.pitch); }
+    if (data.style !== undefined) { updates.push('style = ?'); params.push(data.style); }
+    if (data.avatarBase64 !== undefined) { updates.push('avatar = ?'); params.push(avatarFileName); }
+
+    if (updates.length > 0) {
+      params.push(id);
+      await pool.query(`UPDATE agents SET ${updates.join(', ')} WHERE id = ?`, params);
+    }
+
+    return await this.getRole(id);
   },
 };

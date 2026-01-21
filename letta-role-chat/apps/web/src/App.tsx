@@ -11,6 +11,7 @@ function App() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [editorRole, setEditorRole] = useState<Role | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
   // 暗色模式：true=dark, false=light
@@ -64,9 +65,16 @@ function App() {
     name: string;
     persona: string;
     human: string;
+    voice?: string;
+    speed?: number;
+    pitch?: string;
+    style?: string;
+    avatarBase64?: string | null;
   }) => {
     try {
-      const newRole = await api.createRole(roleData);
+      // avatarBase64 may be null from the editor; normalize to undefined for API
+      const payload = { ...roleData, avatarBase64: roleData.avatarBase64 ?? undefined };
+      const newRole = await api.createRole(payload);
       setRoles((prev) => [newRole, ...prev]);
       setSelectedRole(newRole);
 
@@ -74,6 +82,28 @@ function App() {
       setIsEditorOpen(false);
     } catch (error) {
       console.error("Failed to create role", error);
+    }
+  };
+
+  const handleUpdateRole = async (roleId: string, roleData: {
+    name?: string;
+    persona?: string;
+    human?: string;
+    voice?: string;
+    speed?: number;
+    pitch?: string;
+    style?: string;
+    avatarBase64?: string | null;
+  }) => {
+    try {
+      const payload = { ...roleData, avatarBase64: roleData.avatarBase64 ?? undefined };
+      const updated = await api.updateRole(roleId, payload);
+      setRoles((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+      setSelectedRole(updated);
+      setIsEditorOpen(false);
+      setEditorRole(null);
+    } catch (e) {
+      console.error('Failed to update role', e);
     }
   };
 
@@ -120,7 +150,8 @@ function App() {
           roles={roles}
           selectedRoleId={selectedRole?.id}
           onSelectRole={setSelectedRole}
-          onCreateClick={() => setIsEditorOpen(true)}
+          onCreateClick={() => { setEditorRole(null); setIsEditorOpen(true); }}
+          onEditRole={(r) => { setEditorRole(r); setIsEditorOpen(true); }}
         />
       </div>
 
@@ -152,8 +183,9 @@ function App() {
       {/* ✅ 关键：把 RoleEditor 真正渲染出来 */}
       {isEditorOpen && (
         <RoleEditor
-          onSave={handleCreateRole}
-          onClose={() => setIsEditorOpen(false)}
+          initialRole={editorRole ?? undefined}
+          onSave={editorRole ? (data) => handleUpdateRole(editorRole.id, data) : handleCreateRole}
+          onClose={() => { setIsEditorOpen(false); setEditorRole(null); }}
         />
       )}
     </div>

@@ -242,6 +242,27 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 停止
               </button>
 
+              <button
+                onClick={async () => {
+                  if (!role?.id) return;
+                  const confirm = window.prompt('为防止误删，请输入 DELETE 确认清空历史');
+                  if (confirm !== 'DELETE') return;
+                  try {
+                    await api.deleteHistory(role.id);
+                    setMessages([]);
+                    // 可显示短提示
+                    showWaifuMessage('历史已清空', 3000, 20, true);
+                  } catch (e) {
+                    console.error('Failed to delete history', e);
+                    showWaifuMessage('清空失败', 3000, 20, true);
+                  }
+                }}
+                className="text-xs px-2 py-1 rounded-md ring-1 ring-current/20 opacity-60 hover:opacity-100 transition"
+                title="Clear History"
+              >
+                清空历史
+              </button>
+
               <div className="text-xs opacity-60">{messages.length} msgs</div>
             </div>
           </div>
