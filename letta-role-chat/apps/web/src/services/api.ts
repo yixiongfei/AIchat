@@ -6,7 +6,15 @@ export const api = {
     return res.json();
   },
 
-  async createRole(role: { name: string; persona: string; human: string }) {
+  async createRole(role: { 
+    name: string; 
+    persona: string; 
+    human: string;
+    voice?: string;
+    speed?: number;
+    pitch?: string;
+    style?: string;
+  }) {
     const res = await fetch(`${API_BASE_URL}/roles`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

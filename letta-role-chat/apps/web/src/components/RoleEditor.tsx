@@ -3,7 +3,15 @@ import React, { useState } from "react";
 import { X } from "lucide-react";
 
 interface RoleEditorProps {
-  onSave: (role: { name: string; persona: string; human: string }) => void;
+  onSave: (role: { 
+    name: string; 
+    persona: string; 
+    human: string;
+    voice: string;
+    speed: number;
+    pitch: string;
+    style: string;
+  }) => void;
   onClose: () => void;
 }
 
@@ -11,15 +19,19 @@ export const RoleEditor: React.FC<RoleEditorProps> = ({ onSave, onClose }) => {
   const [name, setName] = useState("");
   const [persona, setPersona] = useState("");
   const [human, setHuman] = useState("");
+  const [voice, setVoice] = useState("ja-JP-MayuNeural");
+  const [speed, setSpeed] = useState(1.0);
+  const [pitch, setPitch] = useState("15");
+  const [style, setStyle] = useState("chat");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
     // ✅ 调试：确认是否真的触发
-    console.log("submit fired", { name, persona, human });
+    console.log("submit fired", { name, persona, human, voice, speed, pitch, style });
 
     try {
-      onSave({ name, persona, human });
+      onSave({ name, persona, human, voice, speed, pitch, style });
       onClose(); // ✅ 保存后关闭弹窗（你想要“点了有反应”通常就是这个）
     } catch (err) {
       console.error("onSave error:", err);
@@ -84,6 +96,62 @@ export const RoleEditor: React.FC<RoleEditorProps> = ({ onSave, onClose }) => {
               className="w-full border rounded-lg px-3 py-2 text-black focus:ring-2 focus:ring-blue-500 outline-none resize-none"
               placeholder="Describe the user this agent is interacting with..."
             />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Voice
+              </label>
+              <input
+                type="text"
+                value={voice}
+                onChange={(e) => setVoice(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                placeholder="ja-JP-MayuNeural"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Speed
+              </label>
+              <input
+                type="number"
+                step="0.1"
+                min="0.25"
+                max="4.0"
+                value={speed}
+                onChange={(e) => setSpeed(parseFloat(e.target.value))}
+                className="w-full border rounded-lg px-3 py-2 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Pitch
+              </label>
+              <input
+                type="text"
+                value={pitch}
+                onChange={(e) => setPitch(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                placeholder="15"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Style
+              </label>
+              <input
+                type="text"
+                value={style}
+                onChange={(e) => setStyle(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                placeholder="chat"
+              />
+            </div>
           </div>
 
           <button
