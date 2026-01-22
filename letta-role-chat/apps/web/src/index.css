@@ -13,4 +13,21 @@
   }
 }
 
+/* Ensure form controls inherit text color and placeholders are readable in dark mode */
+textarea, input, select, button {
+  color: inherit;
+  background-color: transparent;
+}
+
+textarea::placeholder, input::placeholder {
+  color: rgba(15,23,42,0.5); /* slate-900 at reduced opacity for light mode */
+}
+
+@media (prefers-color-scheme: dark) {
+  textarea::placeholder, input::placeholder {
+    color: rgba(255,255,255,0.6);
+  }
+}
+
+
 

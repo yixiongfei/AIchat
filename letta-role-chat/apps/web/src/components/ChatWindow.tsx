@@ -4,6 +4,7 @@ import { Role, Message } from "../types";
 import { Send, Loader2 } from "lucide-react";
 import { api } from "../services/api";
 import useTTS from "../hooks/useTTS";
+import Markdown from "./Markdown";
 import {
   showWaifuMessage,
   showWaifuStreamUpdate,
@@ -278,7 +279,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       )}
 
       <div ref={scrollRef} className={cn("flex-1 overflow-y-auto px-4 py-4", bodyClassName)}>
-        <div className={cn("mx-auto w-full max-w-3xl space-y-4", bodyInnerClassName)}>
+        <div className={cn("mx-auto w-full max-w-3xl space-y-2", bodyInnerClassName)}>
           {messages.map((msg) => {
             const isUser = msg.role === "user";
             return (
@@ -291,7 +292,24 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                       : cn("rounded-tl-md", assistantBubbleClassName)
                   )}
                 >
-                  <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                  {isUser ? (
+                    <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                  ) : (
+                    <Markdown
+                      text={msg.content}
+                      className="
+                        prose prose-invert break-words
+                        prose-headings:mt-4 prose-headings:mb-2
+                        prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg
+                        prose-p:my-2
+                        prose-ul:my-2 prose-ol:my-2
+                        prose-li:my-1
+                        prose-li:leading-relaxed
+                        [&_.prose_li>p]:my-0
+                        [&_.prose_li>p]:leading-relaxed
+                      "
+                    />
+                  )}
                 </div>
               </div>
             );
