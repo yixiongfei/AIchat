@@ -86,16 +86,49 @@ export const api = {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
 
+    // Use a persistent buffer to handle cases where a single 'data: {...}' line
+    // is split across multiple stream chunks. We append each decoded chunk
+    // to the buffer, split by newline, process full lines, and keep the last
+    // partial line for the next read.
+    let buffer = '';
     while (true) {
       const { value, done } = await reader.read();
       if (done) {
+        // process any remaining buffered data
+        if (buffer) {
+          const lines = buffer.split('\n');
+          for (const line of lines) {
+            if (!line) continue;
+            if (line.startsWith('data: ')) {
+              const dataStr = line.slice(6).trim();
+              if (dataStr === '[DONE]') {
+                onDone();
+                return;
+              }
+              try {
+                const data = JSON.parse(dataStr);
+                if (data.choices?.[0]?.delta?.content) {
+                  onChunk(data.choices[0].delta.content);
+                } else if (data.content) {
+                  onChunk(data.content);
+                }
+              } catch (e) {
+                // ignore non-JSON lines
+              }
+            }
+          }
+        }
         onDone();
         break;
       }
 
       const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split('\n');
-      
+      buffer += chunk;
+
+      const lines = buffer.split('\n');
+      // keep last line (may be partial)
+      buffer = lines.pop() || '';
+
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           const dataStr = line.slice(6).trim();

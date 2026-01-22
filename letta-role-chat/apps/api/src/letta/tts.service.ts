@@ -14,12 +14,71 @@ const DEFAULT_TTS = {
 /**
  * ✅ 建议：允许用环境变量固定目录，避免 cwd 漂移
  */
+// 默认使用相对于此文件的 apps/api/temp_audio，避免 process.cwd() 导致的路径偏移
 const TEMP_AUDIO_DIR =
-  process.env.TEMP_AUDIO_DIR || path.resolve(process.cwd(), "temp_audio");
+  process.env.TEMP_AUDIO_DIR || path.resolve(__dirname, "..", "..", "temp_audio");
 
 async function ensureTempDir() {
   await fs.promises.mkdir(TEMP_AUDIO_DIR, { recursive: true });
 }
+
+// 音频缓存管理（内存索引 + 定期清理）
+const audioCache = new Map<string, number>(); // fileName -> createdAt(ms)
+// 默认保留 30 分钟，或超过文件数限制时按最旧删除
+const TEMP_AUDIO_RETENTION_MS = Number(process.env.TEMP_AUDIO_RETENTION_MS) || 30 * 60 * 1000; // 30 minutes
+const TEMP_AUDIO_MAX_FILES = Number(process.env.TEMP_AUDIO_MAX_FILES) || 20; // max files to keep
+// 清理间隔默认 5 分钟（至少 60 秒），避免过于频繁的磁盘操作
+const TEMP_AUDIO_CLEAN_INTERVAL_MS = Math.max(60_000, Number(process.env.TEMP_AUDIO_CLEAN_INTERVAL_MS) || 5 * 60 * 1000);
+
+async function cleanupTempAudio() {
+  try {
+    await ensureTempDir();
+    const files = await fs.promises.readdir(TEMP_AUDIO_DIR);
+    const now = Date.now();
+
+    // 删除超过保留时长的文件（以内存索引时间优先，回退到文件 mtime）
+    for (const f of files) {
+      try {
+        const p = path.join(TEMP_AUDIO_DIR, f);
+        const stat = await fs.promises.stat(p).catch(() => null);
+        const createdAt = audioCache.get(f) ?? stat?.mtimeMs ?? 0;
+        if (now - createdAt > TEMP_AUDIO_RETENTION_MS) {
+          await fs.promises.unlink(p).catch(() => null);
+          audioCache.delete(f);
+          console.log(`[TTS cleanup] removed expired audio: ${f}`);
+        }
+      } catch (e) {
+        // ignore per-file errors
+      }
+    }
+
+    // 如果数量超过阈值，按 mtime 删除最旧的文件
+    const remaining = await fs.promises.readdir(TEMP_AUDIO_DIR);
+    if (remaining.length > TEMP_AUDIO_MAX_FILES) {
+      const stats = await Promise.all(
+        remaining.map(async (f) => {
+          const p = path.join(TEMP_AUDIO_DIR, f);
+          const st = await fs.promises.stat(p).catch(() => null);
+          return { file: f, mtime: st?.mtimeMs || 0 };
+        })
+      );
+      stats.sort((a, b) => a.mtime - b.mtime);
+      const toRemove = stats.slice(0, remaining.length - TEMP_AUDIO_MAX_FILES);
+      for (const r of toRemove) {
+        try {
+          await fs.promises.unlink(path.join(TEMP_AUDIO_DIR, r.file)).catch(() => null);
+          audioCache.delete(r.file);
+          console.log(`[TTS cleanup] removed old audio to respect max files: ${r.file}`);
+        } catch (e) {}
+      }
+    }
+  } catch (e) {
+    console.warn('[TTS cleanup] failed', e);
+  }
+}
+
+// 启动定时清理
+setInterval(cleanupTempAudio, TEMP_AUDIO_CLEAN_INTERVAL_MS);
 
 const WORKER_TTS_URL =
   process.env.WORKER_TTS_URL ||
@@ -93,7 +152,7 @@ export async function textToSpeechFile(params: {
     text,
     agentId,
     format = (process.env.TTS_FORMAT as TTSFormat) || "mp3",
-    timeoutMs = 60_000,
+    timeoutMs = 30_000,
   } = params;
 
   if (!text?.trim()) throw new Error("text is empty");
@@ -116,20 +175,53 @@ export async function textToSpeechFile(params: {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (WORKER_TTS_API_KEY) headers["Authorization"] = `Bearer ${WORKER_TTS_API_KEY}`;
 
     const payload = { input: text, voice, speed, pitch, style, format };
     console.log("[TTS] Sending payload to worker:", payload);
 
-    const resp = await fetch(WORKER_TTS_URL, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
+    // Retry logic for transient network errors
+    const maxAttempts = 3;
+    let attempt = 0;
+    let lastError: any = null;
+    let resp: Response | null = null;
+
+    while (attempt < maxAttempts) {
+      attempt++;
+      const attemptController = new AbortController();
+      const combinedSignal = controller.signal;
+      // If parent aborts, propagate
+      const onAbort = () => attemptController.abort();
+      combinedSignal.addEventListener('abort', onAbort);
+
+      try {
+        resp = await fetch(WORKER_TTS_URL, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(payload),
+          signal: attemptController.signal,
+        });
+
+        // If got response, break loop (we'll check status below)
+        break;
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[TTS] attempt ${attempt} failed:`, err && err.message ? err.message : err);
+        // If aborted by controller, don't retry
+        if (err?.name === 'AbortError') {
+          break;
+        }
+        // small backoff before retrying
+        await new Promise((r) => setTimeout(r, 200 * attempt));
+      } finally {
+        combinedSignal.removeEventListener('abort', onAbort);
+      }
+    }
+
+    if (!resp) {
+      throw lastError || new Error('No response from worker TTS');
+    }
 
     if (!resp.ok) {
       const ct = resp.headers.get("content-type") || "";
@@ -162,16 +254,9 @@ export async function textToSpeechFile(params: {
       }
     }
 
-    setTimeout(() => {
-      try {
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-          console.log(`Auto-cleaned expired audio file: ${fileName}`);
-        }
-      } catch (e) {
-        console.warn("Auto-clean failed:", e);
-      }
-    }, 30 * 60 * 1000);
+    // 记录到内存索引，由定时器负责清理（避免大量 setTimeout）
+    audioCache.set(fileName, Date.now());
+    console.log(`[TTS] wrote audio file: ${filePath}`);
 
     return { fileName, filePath, contentType };
   } catch (error: any) {
@@ -189,9 +274,18 @@ export async function textToSpeechFile(params: {
 
 export function deleteAudioFile(fileName: string) {
   const filePath = path.join(TEMP_AUDIO_DIR, fileName);
+  const keep = process.env.TTS_KEEP_FILES === '1';
+  if (keep) {
+    console.log(`[TTS] TTS_KEEP_FILES=1, skipping deletion of ${fileName}`);
+    // still remove from index to keep bookkeeping consistent
+    try { audioCache.delete(fileName); } catch (e) {}
+    return true;
+  }
   if (fs.existsSync(filePath)) {
     try {
       fs.unlinkSync(filePath);
+      // 从内存索引移除
+      try { audioCache.delete(fileName); } catch(e) {}
       return true;
     } catch (e) {
       console.error(`Failed to delete file ${fileName}:`, e);
