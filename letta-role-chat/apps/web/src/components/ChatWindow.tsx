@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from "react";
 import { Role, Message } from "../types";
 import { Send, Loader2 } from "lucide-react";
@@ -10,6 +9,7 @@ import {
   showWaifuStreamUpdate,
   clearWaifuTimers,
 } from "../utils/live2dBridge";
+import SelectionTTSButton from "./SelectionTTSButton";
 
 const cn = (...classes: Array<string | false | null | undefined>) =>
   classes.filter(Boolean).join(" ");
@@ -47,18 +47,24 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  /** ✅ TTS：自动朗读开关 */
+  /** ✅ TTS:自动朗读开关 */
   const [autoSpeak, setAutoSpeak] = useState(defaultAutoSpeak);
 
-  // pending buffer 保留在 ChatWindow，用以决定何时 flush 到 TTS
-  const pendingTTSRef = useRef<{ buffer: string; timer: number | null }>({ buffer: '', timer: null });
+  // pending buffer 保留在 ChatWindow,用以决定何时 flush 到 TTS
+  const pendingTTSRef = useRef<{ buffer: string; timer: number | null }>({ 
+    buffer: '', 
+    timer: null 
+  });
 
-  // 使用 Hook 管理 TTS 队列、请求与播放顺序
-  const tts = useTTS({ voice: role.voice, speed: role.speed, pitch: role.pitch, style: role.style });
-
-   // TTS 由后端负责决定发送哪个段落（例如带有翻译的文本），前端不再截取。
-   // 保持前端发送完整文本，让后端对管道分段（'|' 或 '｜'）进行日语段识别并调用 TTS。
+  // ✅ 使用 useTTS Hook - 直接传入 role 配置
+  const { enqueue, stop } = useTTS({
+    voice: role?.voice,
+    speed: role?.speed,
+    pitch: role?.pitch,
+    style: role?.style,
+  });
 
   // 加载历史记录
   useEffect(() => {
@@ -90,12 +96,12 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   }, []);
 
   // =========================
-  // ✅ TTS：停止播放并清理
+  // ✅ TTS:停止播放并清理
   // =========================
   const stopSpeak = async () => {
-    // 交由 tts hook 停止并清理队列；同时清除 pending 缓冲
+    // 交由 tts hook 停止并清理队列;同时清除 pending 缓冲
     try {
-      await tts.stop();
+      await stop();
     } catch (e) {
       console.error('tts.stop error:', e);
     }
@@ -156,42 +162,42 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             override: true,
           });
 
-            // 如果自动朗读，按块累积并防抖请求 TTS（避免每个 delta 都调用 TTS）
-            if (autoSpeak) {
-              pendingTTSRef.current.buffer += chunk;
+          // 如果自动朗读,按句累积并防抖请求 TTS(避免每个 delta 都调用 TTS)
+          if (autoSpeak) {
+            pendingTTSRef.current.buffer += chunk;
 
-              const buf = pendingTTSRef.current.buffer.trim();
-              const bufLen = buf.length;
-              const endsWithSentence = /[。！？!?\.]+$/.test(buf);
+            const buf = pendingTTSRef.current.buffer.trim();
+            const bufLen = buf.length;
+            const endsWithSentence = /[。!?!?\.]+$/.test(buf);
 
-              // 决策策略：
-              // - 如果达到较大长度（120），立即发送（长段落直接读）
-              // - 或者缓冲以句号/问号等结尾且长度至少 40，立即发送（完整句子）
-              // - 否则延迟短暂时间等待更多内容或句末标点
-              if (bufLen >= 120 || (endsWithSentence && bufLen >= 40)) {
-                const toSend = buf;
-                pendingTTSRef.current.buffer = '';
-                if (pendingTTSRef.current.timer) {
-                  window.clearTimeout(pendingTTSRef.current.timer);
-                  pendingTTSRef.current.timer = null;
-                }
-                // 直接使用 hook 的入队接口（后端负责日语段识别）
-                tts.enqueue(toSend);
-              } else {
-                if (pendingTTSRef.current.timer) {
-                  window.clearTimeout(pendingTTSRef.current.timer);
-                }
-                // 等待短时间，给流更多机会完成当前句子
-                pendingTTSRef.current.timer = window.setTimeout(() => {
-                  const toSend = pendingTTSRef.current.buffer.trim();
-                  pendingTTSRef.current.buffer = '';
-                  pendingTTSRef.current.timer = null;
-                  if (toSend) {
-                    tts.enqueue(toSend);
-                  }
-                }, 300);
+            // 决策策略:
+            // - 如果达到较大长度(120),立即发送(长段落直接读)
+            // - 或者缓冲以句号/问号等结尾且长度至少 40,立即发送(完整句子)
+            // - 否则延迟短暂时间等待更多内容或句末标点
+            if (bufLen >= 120 || (endsWithSentence && bufLen >= 40)) {
+              const toSend = buf;
+              pendingTTSRef.current.buffer = '';
+              if (pendingTTSRef.current.timer) {
+                window.clearTimeout(pendingTTSRef.current.timer);
+                pendingTTSRef.current.timer = null;
               }
+              // ✅ 直接使用 hook 的入队接口
+              enqueue(toSend);
+            } else {
+              if (pendingTTSRef.current.timer) {
+                window.clearTimeout(pendingTTSRef.current.timer);
+              }
+              // 等待短时间,给流更多机会完成当前句子
+              pendingTTSRef.current.timer = window.setTimeout(() => {
+                const toSend = pendingTTSRef.current.buffer.trim();
+                pendingTTSRef.current.buffer = '';
+                pendingTTSRef.current.timer = null;
+                if (toSend) {
+                  enqueue(toSend);
+                }
+              }, 300);
             }
+          }
         },
         async () => {
           setIsLoading(false);
@@ -199,7 +205,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           if (assistantContent.trim()) {
             showWaifuMessage(assistantContent, 8000, 10, true);
 
-            // ✅ 流式结束后朗读：先把待发送的 buffer 刷出
+            // ✅ 流式结束后朗读:先把待发送的 buffer 刷出
             if (autoSpeak) {
               if (pendingTTSRef.current.timer) {
                 window.clearTimeout(pendingTTSRef.current.timer);
@@ -208,7 +214,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               const remaining = pendingTTSRef.current.buffer.trim();
               pendingTTSRef.current.buffer = '';
               if (remaining) {
-                await tts.enqueue(remaining);
+                await enqueue(remaining);
               }
             }
           }
@@ -217,7 +223,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     } catch (error) {
       console.error("Chat error:", error);
       setIsLoading(false);
-      showWaifuMessage("好像出错了…要不要再试一次？", 5000, 20, true);
+      showWaifuMessage("好像出错了…要不要再试一次?", 5000, 20, true);
     }
   };
 
@@ -240,7 +246,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 )}
                 title="Auto Speak"
               >
-                {autoSpeak ? "自动朗读：开" : "自动朗读：关"}
+                {autoSpeak ? "自动朗读:开" : "自动朗读:关"}
               </button>
 
               <button
@@ -254,12 +260,11 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               <button
                 onClick={async () => {
                   if (!role?.id) return;
-                  const confirm = window.prompt('为防止误删，请输入 DELETE 确认清空历史');
+                  const confirm = window.prompt('为防止误删,请输入 DELETE 确认清空历史');
                   if (confirm !== 'DELETE') return;
                   try {
                     await api.deleteHistory(role.id);
                     setMessages([]);
-                    // 可显示短提示
                     showWaifuMessage('历史已清空', 3000, 20, true);
                   } catch (e) {
                     console.error('Failed to delete history', e);
@@ -279,51 +284,62 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       )}
 
       <div ref={scrollRef} className={cn("flex-1 overflow-y-auto px-4 py-4", bodyClassName)}>
-        <div className={cn("mx-auto w-full max-w-3xl space-y-2", bodyInnerClassName)}>
-          {messages.map((msg) => {
-            const isUser = msg.role === "user";
-            return (
-              <div key={msg.id} className={cn("flex", isUser ? "justify-end" : "justify-start")}>
-                <div
-                  className={cn(
-                    "max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed",
-                    isUser
-                      ? cn("rounded-tr-md", userBubbleClassName)
-                      : cn("rounded-tl-md", assistantBubbleClassName)
-                  )}
-                >
-                  {isUser ? (
-                    <p className="whitespace-pre-wrap break-words">{msg.content}</p>
-                  ) : (
-                    <Markdown
-                      text={msg.content}
-                      className="
-                        prose prose-invert break-words
-                        prose-headings:mt-4 prose-headings:mb-2
-                        prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg
-                        prose-p:my-2
-                        prose-ul:my-2 prose-ol:my-2
-                        prose-li:my-1
-                        prose-li:leading-relaxed
-                        [&_.prose_li>p]:my-0
-                        [&_.prose_li>p]:leading-relaxed
-                      "
-                    />
-                  )}
+        <div ref={containerRef} className="w-full">
+          <div className={cn("mx-auto w-full max-w-3xl space-y-2", bodyInnerClassName)}>
+            {messages.map((msg) => {
+              const isUser = msg.role === "user";
+              return (
+                <div key={msg.id} className={cn("flex", isUser ? "justify-end" : "justify-start")}>
+                  <div
+                    className={cn(
+                      "max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed",
+                      isUser
+                        ? cn("rounded-tr-md", userBubbleClassName)
+                        : cn("rounded-tl-md", assistantBubbleClassName)
+                    )}
+                  >
+                    {isUser ? (
+                      <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                    ) : (
+                      <Markdown
+                        text={msg.content}
+                        className="
+                          prose prose-invert break-words
+                          prose-headings:mt-4 prose-headings:mb-2
+                          prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg
+                          prose-p:my-2
+                          prose-ul:my-2 prose-ol:my-2
+                          prose-li:my-1
+                          prose-li:leading-relaxed
+                          [&_.prose_li>p]:my-0
+                          [&_.prose_li>p]:leading-relaxed
+                        "
+                      />
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
 
-          {isLoading &&
-            !messages.some((m) => m.role === "assistant" && m.id.startsWith("assistant-")) && (
-              <div className="flex justify-start">
-                <div className={cn("rounded-2xl rounded-tl-md px-4 py-3", assistantBubbleClassName)}>
-                  <Loader2 className="animate-spin opacity-70" size={18} />
+            {isLoading &&
+              !messages.some((m) => m.role === "assistant" && m.id.startsWith("assistant-")) && (
+                <div className="flex justify-start">
+                  <div className={cn("rounded-2xl rounded-tl-md px-4 py-3", assistantBubbleClassName)}>
+                    <Loader2 className="animate-spin opacity-70" size={18} />
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+          </div>
         </div>
+        <SelectionTTSButton 
+          containerRef={containerRef} 
+          roleConfig={{
+            voice: role?.voice,
+            speed: role?.speed,
+            pitch: role?.pitch,
+            style: role?.style,
+          }} 
+        />
       </div>
 
       <div className={cn("shrink-0 px-4 py-4", inputBarClassName)}>
@@ -360,7 +376,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </button>
         </div>
 
-        <p className="mt-2 text-xs opacity-60">Enter 发送，Shift+Enter 换行</p>
+        <p className="mt-2 text-xs opacity-60">Enter 发送,Shift+Enter 换行</p>
       </div>
     </div>
   );

@@ -1,0 +1,6 @@
+{
+  "files.associations": {
+    "**/apps/web/src/index.css": "postcss"
+  },
+  "css.validate": false
+}
