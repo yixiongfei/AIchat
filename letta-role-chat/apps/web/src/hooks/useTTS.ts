@@ -1,4 +1,3 @@
-
 import { useEffect, useRef, useCallback } from "react";
 
 export type RoleTTSConfig = {
@@ -20,6 +19,99 @@ type CacheEntry = {
   expiresAt: number;
 };
 
+// ========================================
+// 智能分段工具函数
+// ========================================
+
+function endsWithCompleteSentence(text: string): boolean {
+  return /[。！？.!?…]+\s*$/.test(text);
+}
+
+function endsWithPause(text: string): boolean {
+  return /[，、；,;]+\s*$/.test(text);
+}
+
+function endsWithParagraph(text: string): boolean {
+  return /[。！？.!?…]+\s*\n|(\n\s*){2,}/.test(text);
+}
+
+interface SegmentDecision {
+  shouldSend: boolean;
+  reason: string;
+}
+
+function shouldSendTTSSegment(
+  buffer: string,
+  config?: {
+    minLength?: number;
+    sentenceLength?: number;
+    maxLength?: number;
+    pauseLength?: number;
+  }
+): SegmentDecision {
+  const {
+    minLength = 20,
+    sentenceLength = 30,
+    maxLength = 150,
+    pauseLength = 60,
+  } = config || {};
+
+  const trimmed = buffer.trim();
+  const len = trimmed.length;
+
+  if (len < minLength) {
+    return { shouldSend: false, reason: 'too_short' };
+  }
+
+  if (len >= maxLength) {
+    return { shouldSend: true, reason: 'max_length' };
+  }
+
+  if (endsWithParagraph(trimmed)) {
+    return { shouldSend: true, reason: 'paragraph_end' };
+  }
+
+  if (endsWithCompleteSentence(trimmed) && len >= sentenceLength) {
+    return { shouldSend: true, reason: 'sentence_end' };
+  }
+
+  if (endsWithPause(trimmed) && len >= pauseLength) {
+    return { shouldSend: true, reason: 'pause_end' };
+  }
+
+  return { shouldSend: false, reason: 'waiting' };
+}
+
+function extractSegment(buffer: string): [string, string] {
+  const trimmed = buffer.trim();
+  
+  // 优先按段落分割
+  const paragraphMatch = trimmed.match(/(.*?[。！？.!?…]+\s*\n)/s);
+  if (paragraphMatch) {
+    return [paragraphMatch[1].trim(), trimmed.slice(paragraphMatch[1].length)];
+  }
+
+  // 按完整句子分割
+  const sentenceMatch = trimmed.match(/(.*?[。！？.!?…]+)/);
+  if (sentenceMatch) {
+    return [sentenceMatch[1].trim(), trimmed.slice(sentenceMatch[1].length)];
+  }
+
+  // 按逗号分割（较长时）
+  if (trimmed.length >= 50) {
+    const pauseMatch = trimmed.match(/(.*?[，、；,;]+)/);
+    if (pauseMatch) {
+      return [pauseMatch[1].trim(), trimmed.slice(pauseMatch[1].length)];
+    }
+  }
+
+  return [trimmed, ''];
+}
+
+// ========================================
+// useTTS Hook
+// ========================================
+
 export default function useTTS(roleConfig: RoleTTSConfig) {
   const audioQueueRef = useRef<Map<number, HTMLAudioElement>>(new Map());
   const isPlayingRef = useRef(false);
@@ -35,11 +127,16 @@ export default function useTTS(roleConfig: RoleTTSConfig) {
   const generationRef = useRef(0);
   const controllersRef = useRef<Map<number, AbortController>>(new Map());
 
-  // ✅ 新增：缓存 & 并发去重
+  // 缓存 & 并发去重
   const audioUrlCacheRef = useRef<Map<string, CacheEntry>>(new Map());
   const inFlightRef = useRef<Map<string, Promise<string>>>(new Map());
 
-  // 可配：缓存过期时间与最大条数
+  // ✅ 流式分段缓冲区
+  const streamBufferRef = useRef<{ buffer: string; timer: number | null }>({
+    buffer: '',
+    timer: null,
+  });
+
   const CACHE_TTL_MS = 60 * 60 * 1000; // 1小时
   const CACHE_MAX = 200;
 
@@ -47,7 +144,6 @@ export default function useTTS(roleConfig: RoleTTSConfig) {
 
   const buildCacheKey = (message: string, cfg: RoleTTSConfig) => {
     const text = normalizeText(message);
-    // 把 undefined 统一成空字符串，保证 key 稳定
     const voice = cfg.voice ?? "";
     const speed = cfg.speed ?? "";
     const pitch = cfg.pitch ?? "";
@@ -67,13 +163,10 @@ export default function useTTS(roleConfig: RoleTTSConfig) {
     const now = Date.now();
     const cache = audioUrlCacheRef.current;
 
-    // 1) 清过期
     for (const [k, v] of cache.entries()) {
       if (v.expiresAt <= now) cache.delete(k);
     }
 
-    // 2) 控容量：简单策略（超限就删最早插入的一些）
-    // Map 保持插入顺序：先删头部
     while (cache.size > CACHE_MAX) {
       const firstKey = cache.keys().next().value;
       if (!firstKey) break;
@@ -119,7 +212,6 @@ export default function useTTS(roleConfig: RoleTTSConfig) {
   const stop = useCallback(() => {
     generationRef.current += 1;
 
-    // abort in-flight requests
     for (const [, c] of controllersRef.current.entries()) {
       try { c.abort(); } catch {}
     }
@@ -135,30 +227,30 @@ export default function useTTS(roleConfig: RoleTTSConfig) {
     nextPlaySeqRef.current = 1;
     isPlayingRef.current = false;
 
-    // ✅ 注意：通常 stop 不需要清缓存（否则去重失效）
-    // 如果你希望 stop 后不复用，可在这里清 audioUrlCacheRef.current.clear()
+    // ✅ 清理流式缓冲区
+    if (streamBufferRef.current.timer) {
+      window.clearTimeout(streamBufferRef.current.timer);
+      streamBufferRef.current.timer = null;
+    }
+    streamBufferRef.current.buffer = '';
   }, []);
 
-  // ✅ 核心：获取（或生成）音频 URL（带缓存 + 并发去重）
   const getOrCreateAudioUrl = useCallback(async (message: string, cfg: RoleTTSConfig, signal: AbortSignal) => {
     pruneCache();
 
     const key = buildCacheKey(message, cfg);
     const now = Date.now();
 
-    // 1) 命中缓存
     const cached = audioUrlCacheRef.current.get(key);
     if (cached && cached.expiresAt > now) {
       return cached.url;
     }
 
-    // 2) 并发去重：如果已经有同 key 的请求在跑，直接 await
     const inFlight = inFlightRef.current.get(key);
     if (inFlight) {
       return await inFlight;
     }
 
-    // 3) 发起真正请求，并把 Promise 放进 inFlight
     const p = (async () => {
       const resp = await fetch("/api/tts", {
         method: "POST",
@@ -176,10 +268,8 @@ export default function useTTS(roleConfig: RoleTTSConfig) {
       if (!resp.ok) throw new Error("TTS request failed");
       const { fileName } = await resp.json();
 
-      // 你当前后端是返回 fileName → 再拼音频 URL
       const url = `/api/tts/audio/${fileName}`;
 
-      // 写入缓存
       audioUrlCacheRef.current.set(key, {
         url,
         expiresAt: Date.now() + CACHE_TTL_MS,
@@ -193,7 +283,6 @@ export default function useTTS(roleConfig: RoleTTSConfig) {
     try {
       return await p;
     } finally {
-      // 不管成功失败，都要移除 inFlight，避免卡死
       inFlightRef.current.delete(key);
     }
   }, []);
@@ -218,7 +307,6 @@ export default function useTTS(roleConfig: RoleTTSConfig) {
 
       const audioUrl = await getOrCreateAudioUrl(message, cfg, controller.signal);
 
-      // stop 后返回：丢弃
       if (myGen !== generationRef.current) return;
 
       const audio = new Audio(audioUrl);
@@ -238,9 +326,90 @@ export default function useTTS(roleConfig: RoleTTSConfig) {
     }
   }, [getOrCreateAudioUrl, tryPlayNext, markSeqFailedAndContinue]);
 
+  // ========================================
+  // ✅ 新增：流式追加接口（智能分段）
+  // ========================================
+  const appendStream = useCallback((chunk: string, opts?: {
+    minLength?: number;
+    sentenceLength?: number;
+    maxLength?: number;
+    pauseLength?: number;
+    debounceMs?: number;
+  }) => {
+    const {
+      minLength = 20,
+      sentenceLength = 30,
+      maxLength = 150,
+      pauseLength = 60,
+      debounceMs = 500,
+    } = opts || {};
+
+    streamBufferRef.current.buffer += chunk;
+
+    const decision = shouldSendTTSSegment(streamBufferRef.current.buffer, {
+      minLength,
+      sentenceLength,
+      maxLength,
+      pauseLength,
+    });
+
+    if (decision.shouldSend) {
+      const [toSend, remaining] = extractSegment(streamBufferRef.current.buffer);
+      streamBufferRef.current.buffer = remaining;
+
+      if (streamBufferRef.current.timer) {
+        window.clearTimeout(streamBufferRef.current.timer);
+        streamBufferRef.current.timer = null;
+      }
+
+      if (toSend) {
+        console.log(`[TTS Stream] ${decision.reason}: "${toSend.substring(0, 50)}${toSend.length > 50 ? '...' : ''}"`);
+        enqueue(toSend);
+      }
+    } else {
+      if (streamBufferRef.current.timer) {
+        window.clearTimeout(streamBufferRef.current.timer);
+      }
+
+      streamBufferRef.current.timer = window.setTimeout(() => {
+        const [toSend, remaining] = extractSegment(streamBufferRef.current.buffer);
+        streamBufferRef.current.buffer = remaining;
+        streamBufferRef.current.timer = null;
+
+        if (toSend) {
+          console.log(`[TTS Stream] timeout_flush: "${toSend.substring(0, 50)}${toSend.length > 50 ? '...' : ''}"`);
+          enqueue(toSend);
+        }
+      }, debounceMs);
+    }
+  }, [enqueue]);
+
+  // ========================================
+  // ✅ 新增：刷新缓冲区（流式结束时调用）
+  // ========================================
+  const flushStream = useCallback(async () => {
+    if (streamBufferRef.current.timer) {
+      window.clearTimeout(streamBufferRef.current.timer);
+      streamBufferRef.current.timer = null;
+    }
+
+    const remaining = streamBufferRef.current.buffer.trim();
+    streamBufferRef.current.buffer = '';
+
+    if (remaining) {
+      console.log(`[TTS Stream] flush_remaining: "${remaining.substring(0, 50)}${remaining.length > 50 ? '...' : ''}"`);
+      await enqueue(remaining);
+    }
+  }, [enqueue]);
+
   useEffect(() => {
     return () => stop();
   }, [stop]);
 
-  return { enqueue, stop } as const;
+  return { 
+    enqueue,      // 直接入队完整文本
+    appendStream, // 流式追加（自动分段）
+    flushStream,  // 刷新剩余缓冲
+    stop,         // 停止播放
+  } as const;
 }

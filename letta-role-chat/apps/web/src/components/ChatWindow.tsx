@@ -49,17 +49,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const scrollRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  /** ✅ TTS:自动朗读开关 */
   const [autoSpeak, setAutoSpeak] = useState(defaultAutoSpeak);
 
-  // pending buffer 保留在 ChatWindow,用以决定何时 flush 到 TTS
-  const pendingTTSRef = useRef<{ buffer: string; timer: number | null }>({ 
-    buffer: '', 
-    timer: null 
-  });
-
-  // ✅ 使用 useTTS Hook - 直接传入 role 配置
-  const { enqueue, stop } = useTTS({
+  // ✅ 使用增强后的 useTTS Hook
+  const { appendStream, flushStream, stop } = useTTS({
     voice: role?.voice,
     speed: role?.speed,
     pitch: role?.pitch,
@@ -91,31 +84,11 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   useEffect(() => {
     return () => {
       clearWaifuTimers();
-      stopSpeak();
+      stop();
     };
-  }, []);
+  }, [stop]);
 
-  // =========================
-  // ✅ TTS:停止播放并清理
-  // =========================
-  const stopSpeak = async () => {
-    // 交由 tts hook 停止并清理队列;同时清除 pending 缓冲
-    try {
-      await stop();
-    } catch (e) {
-      console.error('tts.stop error:', e);
-    }
-
-    if (pendingTTSRef.current.timer) {
-      window.clearTimeout(pendingTTSRef.current.timer);
-      pendingTTSRef.current.timer = null;
-      pendingTTSRef.current.buffer = '';
-    }
-  };
-
-  // =========================
   // 发送消息
-  // =========================
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
 
@@ -162,41 +135,15 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             override: true,
           });
 
-          // 如果自动朗读,按句累积并防抖请求 TTS(避免每个 delta 都调用 TTS)
+          // ✅ 简化：直接调用 appendStream，内部自动处理分段
           if (autoSpeak) {
-            pendingTTSRef.current.buffer += chunk;
-
-            const buf = pendingTTSRef.current.buffer.trim();
-            const bufLen = buf.length;
-            const endsWithSentence = /[。!?!?\.]+$/.test(buf);
-
-            // 决策策略:
-            // - 如果达到较大长度(120),立即发送(长段落直接读)
-            // - 或者缓冲以句号/问号等结尾且长度至少 40,立即发送(完整句子)
-            // - 否则延迟短暂时间等待更多内容或句末标点
-            if (bufLen >= 120 || (endsWithSentence && bufLen >= 40)) {
-              const toSend = buf;
-              pendingTTSRef.current.buffer = '';
-              if (pendingTTSRef.current.timer) {
-                window.clearTimeout(pendingTTSRef.current.timer);
-                pendingTTSRef.current.timer = null;
-              }
-              // ✅ 直接使用 hook 的入队接口
-              enqueue(toSend);
-            } else {
-              if (pendingTTSRef.current.timer) {
-                window.clearTimeout(pendingTTSRef.current.timer);
-              }
-              // 等待短时间,给流更多机会完成当前句子
-              pendingTTSRef.current.timer = window.setTimeout(() => {
-                const toSend = pendingTTSRef.current.buffer.trim();
-                pendingTTSRef.current.buffer = '';
-                pendingTTSRef.current.timer = null;
-                if (toSend) {
-                  enqueue(toSend);
-                }
-              }, 300);
-            }
+            appendStream(chunk, {
+              minLength: 20,        // 最少积累 20 字符
+              sentenceLength: 30,   // 完整句子至少 30 字符
+              maxLength: 150,       // 超过 150 强制分段
+              pauseLength: 60,      // 逗号分句至少 60 字符
+              debounceMs: 500,      // 防抖延迟 500ms
+            });
           }
         },
         async () => {
@@ -205,17 +152,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           if (assistantContent.trim()) {
             showWaifuMessage(assistantContent, 8000, 10, true);
 
-            // ✅ 流式结束后朗读:先把待发送的 buffer 刷出
+            // ✅ 流式结束后刷新剩余缓冲
             if (autoSpeak) {
-              if (pendingTTSRef.current.timer) {
-                window.clearTimeout(pendingTTSRef.current.timer);
-                pendingTTSRef.current.timer = null;
-              }
-              const remaining = pendingTTSRef.current.buffer.trim();
-              pendingTTSRef.current.buffer = '';
-              if (remaining) {
-                await enqueue(remaining);
-              }
+              await flushStream();
             }
           }
         }
@@ -250,7 +189,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               </button>
 
               <button
-                onClick={stopSpeak}
+                onClick={stop}
                 className="text-xs px-2 py-1 rounded-md ring-1 ring-current/20 opacity-60 hover:opacity-100 transition"
                 title="Stop"
               >
