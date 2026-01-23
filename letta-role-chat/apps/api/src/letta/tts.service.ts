@@ -3,6 +3,7 @@ import path from "path";
 import { v4 as uuidv4 } from "uuid";
 export type TTSFormat = "wav" | "mp3" | "opus" | "aac" | "flac";
 import {agentService} from "./agent.service";
+
 // ======= 1) 默认值集中管理（硬编码兜底） =======
 const DEFAULT_TTS = {
   voice: "ja-JP-MayuNeural",
@@ -24,24 +25,41 @@ async function ensureTempDir() {
 
 // 音频缓存管理（内存索引 + 定期清理）
 const audioCache = new Map<string, number>(); // fileName -> createdAt(ms)
+
 // 默认保留 30 分钟，或超过文件数限制时按最旧删除
 const TEMP_AUDIO_RETENTION_MS = Number(process.env.TEMP_AUDIO_RETENTION_MS) || 30 * 60 * 1000; // 30 minutes
 const TEMP_AUDIO_MAX_FILES = Number(process.env.TEMP_AUDIO_MAX_FILES) || 20; // max files to keep
+
 // 清理间隔默认 5 分钟（至少 60 秒），避免过于频繁的磁盘操作
 const TEMP_AUDIO_CLEAN_INTERVAL_MS = Math.max(60_000, Number(process.env.TEMP_AUDIO_CLEAN_INTERVAL_MS) || 5 * 60 * 1000);
 
+// ✅ 新增：清理锁，防止并发清理
+let isCleaningUp = false;
+
+/**
+ * ✅ 核心清理函数：删除过期文件 + 控制数量上限
+ */
 async function cleanupTempAudio() {
+  // ✅ 防止并发清理
+  if (isCleaningUp) {
+    console.log('[TTS cleanup] Already running, skipping...');
+    return;
+  }
+
+  isCleaningUp = true;
+
   try {
     await ensureTempDir();
     const files = await fs.promises.readdir(TEMP_AUDIO_DIR);
     const now = Date.now();
 
-    // 删除超过保留时长的文件（以内存索引时间优先，回退到文件 mtime）
+    // ✅ 步骤1：删除超过保留时长的文件（以内存索引时间优先，回退到文件 mtime）
     for (const f of files) {
       try {
         const p = path.join(TEMP_AUDIO_DIR, f);
         const stat = await fs.promises.stat(p).catch(() => null);
         const createdAt = audioCache.get(f) ?? stat?.mtimeMs ?? 0;
+        
         if (now - createdAt > TEMP_AUDIO_RETENTION_MS) {
           await fs.promises.unlink(p).catch(() => null);
           audioCache.delete(f);
@@ -52,33 +70,85 @@ async function cleanupTempAudio() {
       }
     }
 
-    // 如果数量超过阈值，按 mtime 删除最旧的文件
+    // ✅ 步骤2：重新读取目录，如果数量超过阈值，按 mtime 删除最旧的文件
     const remaining = await fs.promises.readdir(TEMP_AUDIO_DIR);
+    
     if (remaining.length > TEMP_AUDIO_MAX_FILES) {
+      console.log(`[TTS cleanup] Files exceed limit (${remaining.length} > ${TEMP_AUDIO_MAX_FILES}), removing oldest...`);
+      
       const stats = await Promise.all(
         remaining.map(async (f) => {
           const p = path.join(TEMP_AUDIO_DIR, f);
           const st = await fs.promises.stat(p).catch(() => null);
-          return { file: f, mtime: st?.mtimeMs || 0 };
+          // ✅ 优先使用内存索引时间，回退到文件 mtime
+          const createdAt = audioCache.get(f) ?? st?.mtimeMs ?? 0;
+          return { file: f, createdAt };
         })
       );
-      stats.sort((a, b) => a.mtime - b.mtime);
-      const toRemove = stats.slice(0, remaining.length - TEMP_AUDIO_MAX_FILES);
+      
+      // ✅ 按创建时间升序排序（最旧的在前）
+      stats.sort((a, b) => a.createdAt - b.createdAt);
+      
+      // ✅ 计算需要删除的数量
+      const numToRemove = remaining.length - TEMP_AUDIO_MAX_FILES;
+      const toRemove = stats.slice(0, numToRemove);
+      
+      console.log(`[TTS cleanup] Removing ${toRemove.length} old files to respect max limit`);
+      
       for (const r of toRemove) {
         try {
-          await fs.promises.unlink(path.join(TEMP_AUDIO_DIR, r.file)).catch(() => null);
+          const p = path.join(TEMP_AUDIO_DIR, r.file);
+          await fs.promises.unlink(p).catch(() => null);
           audioCache.delete(r.file);
-          console.log(`[TTS cleanup] removed old audio to respect max files: ${r.file}`);
-        } catch (e) {}
+          console.log(`[TTS cleanup] removed old audio: ${r.file}`);
+        } catch (e) {
+          console.error(`[TTS cleanup] failed to remove ${r.file}:`, e);
+        }
       }
     }
+
+    // ✅ 步骤3：清理内存索引中不存在的文件引用
+    const actualFiles = new Set(await fs.promises.readdir(TEMP_AUDIO_DIR));
+    for (const [fileName] of audioCache.entries()) {
+      if (!actualFiles.has(fileName)) {
+        audioCache.delete(fileName);
+      }
+    }
+
+    console.log(`[TTS cleanup] Complete. Files: ${actualFiles.size}, Cache entries: ${audioCache.size}`);
   } catch (e) {
     console.warn('[TTS cleanup] failed', e);
+  } finally {
+    isCleaningUp = false;
   }
 }
 
-// 启动定时清理
+/**
+ * ✅ 新增：主动触发清理（在生成新文件后调用）
+ * 非阻塞，异步执行
+ */
+async function triggerCleanupIfNeeded() {
+  try {
+    // ✅ 只检查内存索引大小，避免频繁读取磁盘
+    if (audioCache.size > TEMP_AUDIO_MAX_FILES * 1.2) { // 超过限制的 120% 时触发
+      console.log(`[TTS] Cache size (${audioCache.size}) exceeds threshold, triggering cleanup...`);
+      // ✅ 非阻塞方式触发清理
+      cleanupTempAudio().catch(err => {
+        console.error('[TTS] Cleanup error:', err);
+      });
+    }
+  } catch (e) {
+    console.error('[TTS] triggerCleanupIfNeeded error:', e);
+  }
+}
+
+// ✅ 启动定时清理
 setInterval(cleanupTempAudio, TEMP_AUDIO_CLEAN_INTERVAL_MS);
+
+// ✅ 启动时立即执行一次清理
+cleanupTempAudio().catch(err => {
+  console.error('[TTS] Initial cleanup failed:', err);
+});
 
 const WORKER_TTS_URL =
   process.env.WORKER_TTS_URL ||
@@ -254,9 +324,12 @@ export async function textToSpeechFile(params: {
       }
     }
 
-    // 记录到内存索引，由定时器负责清理（避免大量 setTimeout）
+    // ✅ 记录到内存索引，由定时器负责清理（避免大量 setTimeout）
     audioCache.set(fileName, Date.now());
     console.log(`[TTS] wrote audio file: ${filePath}`);
+
+    // ✅ 生成新文件后，检查是否需要触发清理
+    triggerCleanupIfNeeded();
 
     return { fileName, filePath, contentType };
   } catch (error: any) {

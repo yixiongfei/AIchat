@@ -12,6 +12,7 @@ tts.post("/tts", async (req, res) => {
   try {
     const message: string = req.body?.message ?? "";
     const { voice, speed, pitch, style } = req.body;
+    // console.log("TTS Request:", { message});
     const { fileName } = await textToSpeechFile({
       text: message,
       voice,
