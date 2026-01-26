@@ -1,6 +1,7 @@
 import { Response } from "express";
 import pool from "../storage/db";
 import { v4 as uuidv4 } from "uuid";
+import "dotenv/config";
 
 function normalizeBaseUrl(url: string) {
   return url.replace(/\/$/, "");

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, forwardRef, useImperativeHandle } from "react";
 import { Role, Message } from "../types";
 import { Send, Loader2 } from "lucide-react";
 import { api } from "../services/api";
@@ -27,9 +27,17 @@ interface ChatWindowProps {
   assistantBubbleClassName?: string;
   showHeader?: boolean;
   defaultAutoSpeak?: boolean;
+  onAutoSpeakChange?: (value: boolean) => void;
 }
 
-export const ChatWindow: React.FC<ChatWindowProps> = ({
+// ✅ 暴露给父组件的方法接口
+export interface ChatWindowHandle {
+  toggleAutoSpeak: () => void;
+  stopSpeak: () => void;
+  clearHistory: () => Promise<void>;
+}
+
+export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(({
   role,
   className,
   headerClassName,
@@ -42,7 +50,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   assistantBubbleClassName,
   showHeader = true,
   defaultAutoSpeak = false,
-}) => {
+  onAutoSpeakChange,
+}, ref) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -51,6 +60,17 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
   const [autoSpeak, setAutoSpeak] = useState(defaultAutoSpeak);
 
+  // ✅ 同步 autoSpeak 状态变化
+  useEffect(() => {
+    setAutoSpeak(defaultAutoSpeak);
+  }, [defaultAutoSpeak]);
+
+  // ✅ 当 autoSpeak 改变时通知父组件
+  const handleAutoSpeakChange = (value: boolean) => {
+    setAutoSpeak(value);
+    onAutoSpeakChange?.(value);
+  };
+
   // ✅ 使用增强后的 useTTS Hook
   const { appendStream, flushStream, stop } = useTTS({
     voice: role?.voice,
@@ -58,6 +78,25 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     pitch: role?.pitch,
     style: role?.style,
   });
+
+  // ✅ 暴露方法给父组件（移动端顶部栏使用）
+  useImperativeHandle(ref, () => ({
+    toggleAutoSpeak: () => handleAutoSpeakChange(!autoSpeak),
+    stopSpeak: stop,
+    clearHistory: async () => {
+      if (!role?.id) return;
+      const confirm = window.prompt('为防止误删,请输入 DELETE 确认清空历史');
+      if (confirm !== 'DELETE') return;
+      try {
+        await api.deleteHistory(role.id);
+        setMessages([]);
+        showWaifuMessage('历史已清空', 3000, 20, true);
+      } catch (e) {
+        console.error('Failed to delete history', e);
+        showWaifuMessage('清空失败', 3000, 20, true);
+      }
+    }
+  }), [role?.id, stop, autoSpeak]);
 
   // 加载历史记录
   useEffect(() => {
@@ -178,7 +217,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
             <div className="flex items-center gap-2 shrink-0">
               <button
-                onClick={() => setAutoSpeak((v) => !v)}
+                onClick={() => handleAutoSpeakChange(!autoSpeak)}
                 className={cn(
                   "text-xs px-2 py-1 rounded-md ring-1 ring-current/20 transition",
                   autoSpeak ? "bg-primary/10 opacity-100" : "opacity-60 hover:opacity-100"
@@ -319,4 +358,4 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       </div>
     </div>
   );
-};
+});

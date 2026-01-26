@@ -29,5 +29,43 @@ textarea::placeholder, input::placeholder {
   }
 }
 
+/* ✅ 自定义滚动条样式 - 暗色主题 */
+/* Webkit 浏览器 (Chrome, Safari, Edge) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
 
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.3); /* slate-900 with opacity */
+  border-radius: 4px;
+}
 
+::-webkit-scrollbar-thumb {
+  background: rgba(51, 65, 85, 0.8); /* slate-700 */
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(71, 85, 105, 0.9); /* slate-600 */
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(51, 65, 85, 0.8) rgba(15, 23, 42, 0.3);
+}
+
+/* ✅ 移动端强制隐藏 Live2D */
+@media (max-width: 767px) {
+  #live2d-widget,
+  #live2d-tips,
+  canvas[id^="live2d"],
+  .live2d-widget-container {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
+}

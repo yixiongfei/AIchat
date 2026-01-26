@@ -1,0 +1,63 @@
+# 依赖目录
+node_modules
+**/node_modules
+
+# 构建产物
+dist
+**/dist
+build
+**/build
+
+# 日志文件
+*.log
+logs
+*.log.*
+
+# 环境变量文件
+.env
+.env.local
+.env.*.local
+**/.env
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# 测试
+coverage
+.nyc_output
+**/__tests__
+**/*.test.ts
+**/*.spec.ts
+
+# 数据库和上传文件（这些应该通过卷挂载）
+data
+uploads
+*.db
+*.db-shm
+*.db-wal
+
+# Docker 相关
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# 文档
+README.md
+*.md
+docs
+
+# 其他
+.DS_Store
+Thumbs.db
+.cache
+temp
+tmp
