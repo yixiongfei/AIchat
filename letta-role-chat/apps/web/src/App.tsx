@@ -94,10 +94,12 @@ function App() {
       hideStyle.remove();
     }
 
-    // 检查脚本是否已存在，避免重复加载
-    if (document.getElementById('live2d-autoload')) {
-      return;
-    }
+    // 检查脚本是否已存在，避免重复加载（支持静态 <script> 或 动态注入）
+    const alreadyInjected = Boolean(document.getElementById('live2d-autoload')) ||
+      Array.from(document.scripts).some(s => (s.src || '').includes('live2d-widget')) ||
+      // 某些版本会声明全局变量
+      (window as any).live2d_path !== undefined;
+    if (alreadyInjected) return;
 
     // 加载 Live2D
     const script = document.createElement('script');

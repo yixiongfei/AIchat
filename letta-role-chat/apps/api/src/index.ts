@@ -18,7 +18,7 @@ app.use(express.json({ limit: "2mb" }));
 app.use("/api", tts);
 // 静态托管 avatar 上传目录
 const avatarsDir = process.env.AVATAR_DIR || path.resolve(process.cwd(), "uploads", "avatars");
-app.use('/avatars', express.static(avatarsDir));
+app.use('/api/avatars', express.static(avatarsDir));
 app.use("/api/roles", roleRoutes);
 app.use("/api/messages", messageRoutes);
 

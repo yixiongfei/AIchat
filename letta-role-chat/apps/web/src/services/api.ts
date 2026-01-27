@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://172.26.36.106:3001/api';
+const API_BASE_URL = "/api";
 
 export const api = {
   async getRoles() {
@@ -7,7 +7,7 @@ export const api = {
     // 将 avatar 文件名转换为完整 URL
     return data.map((r: any) => ({
       ...r,
-      avatar: r.avatar ? `${API_BASE_URL.replace(/\/api$/, '')}/avatars/${r.avatar}` : undefined,
+      avatar: r.avatar ? `${API_BASE_URL}/avatars/${r.avatar}` : undefined
     }));
   },
 
