@@ -45,7 +45,7 @@ function shouldSendTTSSegment(
   const {
     minLength = 15,
     sentenceLength = 25,
-    maxLength = 200,
+    maxLength = 500,
     pauseLength = 25,
   } = config || {};
 

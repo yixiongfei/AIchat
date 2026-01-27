@@ -26,9 +26,9 @@ async function ensureTempDir() {
 // 音频缓存管理（内存索引 + 定期清理）
 const audioCache = new Map<string, number>(); // fileName -> createdAt(ms)
 
-// 默认保留 30 分钟，或超过文件数限制时按最旧删除
-const TEMP_AUDIO_RETENTION_MS = Number(process.env.TEMP_AUDIO_RETENTION_MS) || 30 * 60 * 1000; // 30 minutes
-const TEMP_AUDIO_MAX_FILES = Number(process.env.TEMP_AUDIO_MAX_FILES) || 20; // max files to keep
+// 默认保留 10 分钟，或超过文件数30限制时按最旧删除
+const TEMP_AUDIO_RETENTION_MS = Number(process.env.TEMP_AUDIO_RETENTION_MS) || 10 * 60 * 1000; // 30 minutes
+const TEMP_AUDIO_MAX_FILES = Number(process.env.TEMP_AUDIO_MAX_FILES) || 30; // max files to keep
 
 // 清理间隔默认 5 分钟（至少 60 秒），避免过于频繁的磁盘操作
 const TEMP_AUDIO_CLEAN_INTERVAL_MS = Math.max(60_000, Number(process.env.TEMP_AUDIO_CLEAN_INTERVAL_MS) || 5 * 60 * 1000);

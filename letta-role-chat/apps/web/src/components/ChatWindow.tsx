@@ -353,8 +353,6 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(({
             {isLoading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
           </button>
         </div>
-
-        <p className="mt-2 text-xs opacity-60">Enter 发送,Shift+Enter 换行</p>
       </div>
     </div>
   );
