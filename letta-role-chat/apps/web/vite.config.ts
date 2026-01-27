@@ -9,10 +9,10 @@ export default defineConfig({
   plugins: [react()],
   publicDir: '../../CubismSdkForWeb-5-r.4',
   server: {
-    port: 3000,
+    host: "0.0.0.0",
+    port: 5173,
     proxy: {
       '/api': {
-        // 后端服务运行在 3001 端口，这里之前写错了
         target,
         changeOrigin: true,
       },
