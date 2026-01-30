@@ -1,10 +1,20 @@
+
 import { useState, useEffect, useRef } from "react";
 import { RoleList } from "./components/RoleList";
 import { RoleEditor } from "./components/RoleEditor";
 import { ChatWindow } from "./components/ChatWindow";
 import { Role } from "./types";
 import { api } from "./services/api";
-import { RefreshCw, Moon, Sun, Menu, X } from "lucide-react";
+import { RefreshCw, Moon, Sun, Menu, X, Code2 } from "lucide-react";
+
+// ✅ 新增：代码侧边面板组件
+import { CodeSidePanel } from "./components/CodeSidePanel";
+
+type ArtifactPayload = {
+  title?: string;
+  language?: string;
+  code?: string;
+};
 
 function App() {
   const [roles, setRoles] = useState<Role[]>([]);
@@ -31,9 +41,41 @@ function App() {
 
   // ✅ ChatWindow ref - 用于移动端调用内部方法
   const chatWindowRef = useRef<any>(null);
-  
+
   // ✅ 移动端自动朗读状态（状态提升）
   const [autoSpeak, setAutoSpeak] = useState(false);
+
+  // =========================
+  // ✅ 新增：Claude 风格“右侧代码面板（Artifacts）”状态
+  // =========================
+  const [artifactOpen, setArtifactOpen] = useState(false);
+  const [artifactTitle, setArtifactTitle] = useState("code");
+  const [artifactLang, setArtifactLang] = useState("text");
+  const [artifactCode, setArtifactCode] = useState("");
+  // ✅ 右侧代码面板宽度（桌面端）
+  const [artifactWidth, setArtifactWidth] = useState(() => {
+    const saved = localStorage.getItem("artifactWidth");
+    return saved ? parseInt(saved, 10) : 520;
+  });
+
+  useEffect(() => {
+    localStorage.setItem("artifactWidth", String(artifactWidth));
+  }, [artifactWidth]);
+
+
+  // ✅ 通过全局事件打开（不需要改 ChatWindow/RoleList）
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent<ArtifactPayload>;
+      const detail = ce.detail || {};
+      if (detail.title) setArtifactTitle(detail.title);
+      if (detail.language) setArtifactLang(detail.language);
+      if (typeof detail.code === "string") setArtifactCode(detail.code);
+      setArtifactOpen(true);
+    };
+    window.addEventListener("open-artifact", handler as EventListener);
+    return () => window.removeEventListener("open-artifact", handler as EventListener);
+  }, []);
 
   // ✅ 检测移动设备
   useEffect(() => {
@@ -56,26 +98,26 @@ function App() {
   useEffect(() => {
     if (isMobile) {
       // 移动端：移除 Live2D 相关元素
-      const script = document.getElementById('live2d-autoload');
+      const script = document.getElementById("live2d-autoload");
       if (script) {
         script.remove();
       }
-      
+
       // 移除所有 Live2D 相关元素
-      const widget = document.getElementById('live2d-widget');
+      const widget = document.getElementById("live2d-widget");
       if (widget) {
         widget.remove();
       }
-      
+
       // Live2D 可能创建的其他元素
-      const tips = document.getElementById('live2d-tips');
+      const tips = document.getElementById("live2d-tips");
       if (tips) {
         tips.remove();
       }
-      
+
       // 添加 CSS 隐藏（双重保障）
-      const style = document.createElement('style');
-      style.id = 'live2d-mobile-hide';
+      const style = document.createElement("style");
+      style.id = "live2d-mobile-hide";
       style.textContent = `
         #live2d-widget,
         #live2d-tips,
@@ -84,38 +126,39 @@ function App() {
         }
       `;
       document.head.appendChild(style);
-      
+
       return;
     }
 
     // 桌面端：移除隐藏样式
-    const hideStyle = document.getElementById('live2d-mobile-hide');
+    const hideStyle = document.getElementById("live2d-mobile-hide");
     if (hideStyle) {
       hideStyle.remove();
     }
 
     // 检查脚本是否已存在，避免重复加载（支持静态 <script> 或 动态注入）
-    const alreadyInjected = Boolean(document.getElementById('live2d-autoload')) ||
-      Array.from(document.scripts).some(s => (s.src || '').includes('live2d-widget')) ||
+    const alreadyInjected =
+      Boolean(document.getElementById("live2d-autoload")) ||
+      Array.from(document.scripts).some((s) => (s.src || "").includes("live2d-widget")) ||
       // 某些版本会声明全局变量
       (window as any).live2d_path !== undefined;
     if (alreadyInjected) return;
 
     // 加载 Live2D
-    const script = document.createElement('script');
-    script.id = 'live2d-autoload';
-    script.src = 'https://cdn.jsdelivr.net/gh/yixiongfei/live2d-widget@master/dist/autoload.js';
+    const script = document.createElement("script");
+    script.id = "live2d-autoload";
+    script.src = "https://cdn.jsdelivr.net/gh/yixiongfei/live2d-widget@master/dist/autoload.js";
     script.async = true;
     document.body.appendChild(script);
 
     return () => {
       // 切换到移动端时清理
-      const existing = document.getElementById('live2d-autoload');
+      const existing = document.getElementById("live2d-autoload");
       if (existing) {
         existing.remove();
       }
-      
-      const widget = document.getElementById('live2d-widget');
+
+      const widget = document.getElementById("live2d-widget");
       if (widget) {
         widget.remove();
       }
@@ -124,8 +167,7 @@ function App() {
 
   useEffect(() => {
     const saved = localStorage.getItem("theme");
-    const prefersDark =
-      window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+    const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
     const shouldDark = saved ? saved === "dark" : prefersDark;
 
     setIsDark(shouldDark);
@@ -135,7 +177,7 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ 处理侧边栏拖动调整（仅桌面端）
+  // ✅ 处理侧边栏拖动调整（仅桌面端显示）
   useEffect(() => {
     if (isMobile) return;
 
@@ -220,16 +262,19 @@ function App() {
     }
   };
 
-  const handleUpdateRole = async (roleId: string, roleData: {
-    name?: string;
-    persona?: string;
-    human?: string;
-    voice?: string;
-    speed?: number;
-    pitch?: string;
-    style?: string;
-    avatarBase64?: string | null;
-  }) => {
+  const handleUpdateRole = async (
+    roleId: string,
+    roleData: {
+      name?: string;
+      persona?: string;
+      human?: string;
+      voice?: string;
+      speed?: number;
+      pitch?: string;
+      style?: string;
+      avatarBase64?: string | null;
+    }
+  ) => {
     try {
       const payload = { ...roleData, avatarBase64: roleData.avatarBase64 ?? undefined };
       const updated = await api.updateRole(roleId, payload);
@@ -238,7 +283,7 @@ function App() {
       setIsEditorOpen(false);
       setEditorRole(null);
     } catch (e) {
-      console.error('Failed to update role', e);
+      console.error("Failed to update role", e);
     }
   };
 
@@ -253,10 +298,7 @@ function App() {
     <div className="flex h-screen overflow-hidden font-sans bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       {/* ✅ 移动端遮罩层 */}
       {isMobile && sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 z-40 md:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
+        <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
       {/* ✅ 左侧栏 - 响应式 */}
@@ -265,16 +307,14 @@ function App() {
           shrink-0 flex flex-col border-r border-slate-200 bg-slate-50 
           dark:border-slate-800 dark:bg-slate-900/40
           transition-transform duration-300 ease-in-out
-          ${isMobile ? 'fixed inset-y-0 left-0 w-[280px] z-50' : 'relative z-0'}
-          ${isMobile && !sidebarOpen ? '-translate-x-full' : 'translate-x-0'}
+          ${isMobile ? "fixed inset-y-0 left-0 w-[280px] z-50" : "relative z-0"}
+          ${isMobile && !sidebarOpen ? "-translate-x-full" : "translate-x-0"}
         `}
         style={!isMobile ? { width: `${sidebarWidth}px` } : undefined}
       >
         {/* 顶部栏 */}
         <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-white dark:border-slate-800 dark:bg-slate-900">
-          <h1 className="font-bold text-xl text-blue-600 dark:text-blue-400">
-            Letta Chat
-          </h1>
+          <h1 className="font-bold text-xl text-blue-600 dark:text-blue-400">Letta Chat</h1>
 
           <div className="flex items-center gap-2">
             {/* ✅ 移动端关闭按钮 */}
@@ -304,9 +344,7 @@ function App() {
               className={[
                 "p-2 rounded-full transition-colors",
                 "hover:bg-slate-100 dark:hover:bg-slate-800",
-                isSyncing
-                  ? "animate-spin text-blue-400"
-                  : "text-slate-600 dark:text-slate-300",
+                isSyncing ? "animate-spin text-blue-400" : "text-slate-600 dark:text-slate-300",
                 "disabled:opacity-60 disabled:cursor-not-allowed",
               ].join(" ")}
               title="Sync from Letta Cloud"
@@ -320,8 +358,14 @@ function App() {
           roles={roles}
           selectedRoleId={selectedRole?.id}
           onSelectRole={handleSelectRole}
-          onCreateClick={() => { setEditorRole(null); setIsEditorOpen(true); }}
-          onEditRole={(r) => { setEditorRole(r); setIsEditorOpen(true); }}
+          onCreateClick={() => {
+            setEditorRole(null);
+            setIsEditorOpen(true);
+          }}
+          onEditRole={(r) => {
+            setEditorRole(r);
+            setIsEditorOpen(true);
+          }}
         />
       </div>
 
@@ -337,7 +381,12 @@ function App() {
       )}
 
       {/* 右侧 ChatWindow：占满剩余空间 */}
-      <aside className="flex-1 min-w-0 h-screen border-l border-slate-800/60 bg-slate-950 text-slate-100 relative flex flex-col">
+      <aside className="flex-1 min-w-0 h-screen border-l border-slate-800/60 bg-slate-950 text-slate-100 relative flex flex-col"
+      style={{
+        // ✅ 仅桌面端且面板打开时，右侧留出空间避免遮挡
+        marginRight: !isMobile && artifactOpen ? `${artifactWidth}px` : undefined,
+      }}
+      >
         {/* ✅ 移动端顶部栏：显示汉堡菜单 + Agent 信息 + 功能按钮 */}
         {isMobile && selectedRole && (
           <div className="shrink-0 px-3 py-2 border-b border-slate-800/60 bg-slate-950/90 backdrop-blur sticky top-0 z-30 md:hidden">
@@ -375,13 +424,11 @@ function App() {
                 <button
                   onClick={() => chatWindowRef.current?.toggleAutoSpeak?.()}
                   className={`p-1.5 rounded-md text-base transition-all ${
-                    autoSpeak 
-                      ? 'bg-blue-600/80 hover:bg-blue-600' 
-                      : 'bg-slate-800/40 hover:bg-slate-800/60'
+                    autoSpeak ? "bg-blue-600/80 hover:bg-blue-600" : "bg-slate-800/40 hover:bg-slate-800/60"
                   }`}
                   title={autoSpeak ? "自动朗读：开" : "自动朗读：关"}
                 >
-                  {autoSpeak ? '🔊' : '🔇'}
+                  {autoSpeak ? "🔊" : "🔇"}
                 </button>
 
                 {/* 停止按钮 */}
@@ -428,9 +475,7 @@ function App() {
               assistantBubbleClassName="bg-slate-900/70 text-slate-100 ring-1 ring-slate-800"
             />
           ) : (
-            <div className="h-full flex items-center justify-center text-slate-400">
-              请选择一个角色
-            </div>
+            <div className="h-full flex items-center justify-center text-slate-400">请选择一个角色</div>
           )}
         </div>
       </aside>
@@ -440,9 +485,45 @@ function App() {
         <RoleEditor
           initialRole={editorRole ?? undefined}
           onSave={editorRole ? (data) => handleUpdateRole(editorRole.id, data) : handleCreateRole}
-          onClose={() => { setIsEditorOpen(false); setEditorRole(null); }}
+          onClose={() => {
+            setIsEditorOpen(false);
+            setEditorRole(null);
+          }}
         />
       )}
+
+      {/* =========================
+          ✅ 新增：Claude 风格“侧边代码面板”
+          - 不改变你原结构，只是额外渲染在最外层
+         ========================= */}
+      <CodeSidePanel
+      open={artifactOpen}
+      onClose={() => setArtifactOpen(false)}
+      title={artifactTitle}
+      language={artifactLang}
+      code={artifactCode}
+      width={artifactWidth}
+      onWidthChange={setArtifactWidth}
+      minWidth={360}
+      maxWidth={980}
+      />
+
+      {/* ✅ 新增：右下角浮动按钮（不影响现有 UI）
+          点击可打开/关闭面板
+      */}
+      <button
+        onClick={() => setArtifactOpen((v) => !v)}
+        className={[
+          "fixed bottom-4 right-4 z-[60]",
+          "rounded-full p-3",
+          "bg-blue-600 hover:bg-blue-700",
+          "text-white shadow-lg shadow-black/30",
+          "transition-transform active:scale-95",
+        ].join(" ")}
+        title="Open Code Panel"
+      >
+        <Code2 size={20} />
+      </button>
     </div>
   );
 }

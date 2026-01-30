@@ -14,6 +14,58 @@ import SelectionTTSButton from "./SelectionTTSButton";
 const cn = (...classes: Array<string | false | null | undefined>) =>
   classes.filter(Boolean).join(" ");
 
+// ===== 折叠长代码：helper =====
+type CodeBlockInfo = {
+  language: string;
+  code: string;
+  lines: number;
+  chars: number;
+};
+
+// 提取第一段 fenced code（```lang ... ```）
+function extractFirstFencedCode(text: string): CodeBlockInfo | null {
+  const re = /```(\w+)?\n([\s\S]*?)```/m;
+  const m = text.match(re);
+  if (!m) return null;
+
+  const language = (m[1] || "text").toLowerCase();
+  const code = m[2] || "";
+  const lines = code.split("\n").length;
+  const chars = code.length;
+  return { language, code, lines, chars };
+}
+
+function shouldCollapseMessage(text: string) {
+  const totalChars = text.length;
+  const block = extractFirstFencedCode(text);
+
+  // 你可以调这些阈值
+  const CODE_LINE_THRESHOLD = 30;
+  const CODE_CHAR_THRESHOLD = 1200;
+  const TEXT_CHAR_THRESHOLD = 2000;
+
+  const hasLongCode =
+    !!block && (block.lines >= CODE_LINE_THRESHOLD || block.chars >= CODE_CHAR_THRESHOLD);
+
+  const hasVeryLongText = totalChars >= TEXT_CHAR_THRESHOLD;
+
+  return { collapse: hasLongCode || hasVeryLongText, block };
+}
+
+function previewText(text: string, maxChars = 240) {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (t.length <= maxChars) return t;
+  return t.slice(0, maxChars) + "…";
+}
+
+// 可选：打开你之前做的右侧代码面板（Artifacts）
+function openArtifact(title: string, language: string, code: string) {
+  window.dispatchEvent(
+    new CustomEvent("open-artifact", {
+      detail: { title, language, code },
+    })
+  );
+}
 interface ChatWindowProps {
   role: Role;
   className?: string;
@@ -57,8 +109,13 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(({
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-
   const [autoSpeak, setAutoSpeak] = useState(defaultAutoSpeak);
+  // 每条消息是否展开：key=msg.id
+  const [expandedMap, setExpandedMap] = useState<Record<string, boolean>>({});
+  const toggleExpanded = (id: string) => {
+    setExpandedMap(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
 
   // ✅ 同步 autoSpeak 状态变化
   useEffect(() => {
@@ -276,24 +333,107 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(({
                         : cn("rounded-tl-md", assistantBubbleClassName)
                     )}
                   >
-                    {isUser ? (
-                      <p className="whitespace-pre-wrap break-words">{msg.content}</p>
-                    ) : (
-                      <Markdown
-                        text={msg.content}
-                        className="
-                          prose prose-invert break-words
-                          prose-headings:mt-4 prose-headings:mb-2
-                          prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg
-                          prose-p:my-2
-                          prose-ul:my-2 prose-ol:my-2
-                          prose-li:my-1
-                          prose-li:leading-relaxed
-                          [&_.prose_li>p]:my-0
-                          [&_.prose_li>p]:leading-relaxed
-                        "
-                      />
-                    )}
+
+                    {(() => {
+                      const { collapse, block } = shouldCollapseMessage(msg.content);
+                      const expanded = !!expandedMap[msg.id];
+
+                      // 如果不需要折叠，保持你原来逻辑不变
+                      if (!collapse) {
+                        return isUser ? (
+                          <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                        ) : (
+                          <Markdown
+                            text={msg.content}
+                            className="
+          prose prose-invert break-words
+          prose-headings:mt-4 prose-headings:mb-2
+          prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg
+          prose-p:my-2
+          prose-ul:my-2 prose-ol:my-2
+          prose-li:my-1
+          prose-li:leading-relaxed
+          [&_.prose_li>p]:my-0
+          [&_.prose_li>p]:leading-relaxed
+        "
+                          />
+                        );
+                      }
+
+                      // 需要折叠：显示一个折叠头 + 内容（可展开）
+                      return (
+                        <div className="w-full">
+                          {/* 折叠头 */}
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <div className="text-xs text-slate-300/80">
+                              {block
+                                ? `代码块（${block.language.toUpperCase()}） · ${block.lines} 行`
+                                : `长消息 · ${msg.content.length} 字符`}
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              {/* 可选：如果有 code block，提供“在侧边栏打开” */}
+                              {block && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    openArtifact(
+                                      `${role.name}-snippet`,
+                                      block.language,
+                                      block.code
+                                    )
+                                  }
+                                  className="text-xs px-2 py-1 rounded-md bg-slate-800/50 hover:bg-slate-800 ring-1 ring-white/10 transition"
+                                  title="在侧边栏打开"
+                                >
+                                  在侧边栏打开
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => toggleExpanded(msg.id)}
+                                className="text-xs px-2 py-1 rounded-md bg-slate-800/50 hover:bg-slate-800 ring-1 ring-white/10 transition"
+                              >
+                                {expanded ? "收起" : "展开"}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* 折叠内容 */}
+                          {!expanded ? (
+                            // 折叠态：显示预览（不渲染 Markdown，避免太长）
+                            <div className="text-sm text-slate-200/90 whitespace-pre-wrap break-words">
+                              {block
+                                ? previewText(block.code, 260) // 预览代码
+                                : previewText(msg.content, 260)}
+                            </div>
+                          ) : (
+                            // 展开态：渲染原内容（保持你原来 Markdown 展示）
+                            <>
+                              {isUser ? (
+                                <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                              ) : (
+                                <Markdown
+                                  text={msg.content}
+                                  className="
+                                    prose prose-invert break-words
+                                    prose-headings:mt-4 prose-headings:mb-2
+                                    prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg
+                                    prose-p:my-2
+                                    prose-ul:my-2 prose-ol:my-2
+                                    prose-li:my-1
+                                    prose-li:leading-relaxed
+                                    [&_.prose_li>p]:my-0
+                                    [&_.prose_li>p]:leading-relaxed
+                                  "
+                                />
+                              )}
+                            </>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               );
@@ -309,49 +449,51 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(({
               )}
           </div>
         </div>
-        <SelectionTTSButton 
-          containerRef={containerRef} 
+        <SelectionTTSButton
+          containerRef={containerRef}
           roleConfig={{
             voice: role?.voice,
             speed: role?.speed,
             pitch: role?.pitch,
             style: role?.style,
-          }} 
+          }}
         />
       </div>
 
       <div className={cn("shrink-0 px-4 py-4", inputBarClassName)}>
-        <div className="flex items-end gap-2">
-          <textarea
-            value={input}
-            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setInput(e.target.value)}
-            onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-            placeholder={`Message ${role.name}...`}
-            rows={2}
-            className={cn(
-              "flex-1 resize-none rounded-2xl px-4 py-3 text-sm outline-none",
-              "min-h-[56px] max-h-[160px]",
-              inputClassName
-            )}
-          />
+        <div className="mx-auto w-full max-w-[1100px]">
+          <div className="flex items-end gap-2">
+            <textarea
+              value={input}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setInput(e.target.value)}
+              onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              placeholder={`Message ${role.name}...`}
+              rows={2}
+              className={cn(
+                "flex-1 resize-none rounded-2xl px-4 py-3 text-sm outline-none",
+                "min-h-[56px] max-h-[160px]",
+                inputClassName
+              )}
+            />
 
-          <button
-            onClick={handleSend}
-            disabled={isLoading || !input.trim()}
-            className={cn(
-              "h-12 w-12 rounded-2xl inline-flex items-center justify-center transition",
-              "disabled:opacity-50 disabled:cursor-not-allowed",
-              sendButtonClassName
-            )}
-            title="Send"
-          >
-            {isLoading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
-          </button>
+            <button
+              onClick={handleSend}
+              disabled={isLoading || !input.trim()}
+              className={cn(
+                "h-12 w-12 rounded-2xl inline-flex items-center justify-center transition",
+                "disabled:opacity-50 disabled:cursor-not-allowed",
+                sendButtonClassName
+              )}
+              title="Send"
+            >
+              {isLoading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+            </button>
+          </div>
         </div>
       </div>
     </div>
