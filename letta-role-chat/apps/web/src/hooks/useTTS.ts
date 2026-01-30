@@ -1,3 +1,4 @@
+
 import { useEffect, useRef, useCallback } from "react";
 
 export type RoleTTSConfig = {
@@ -12,6 +13,8 @@ type EnqueueOptions = {
   speed?: number;
   pitch?: string;
   style?: string;
+  /** 是否对文本做净化（去代码等），默认 true */
+  sanitize?: boolean;
 };
 
 type CacheEntry = {
@@ -20,12 +23,184 @@ type CacheEntry = {
 };
 
 // ========================================
-// 智能分段工具函数
+// 文字净化（非流式 / 最终兜底）：只保留可朗读文字
 // ========================================
 
-// ✅ 计算有效内容长度（去除所有空白符）
+function sanitizeForTTS(markdown: string) {
+  if (!markdown) return "";
+
+  let s = markdown;
+
+  // ---------- 1) 去代码 ----------
+  // fenced code blocks
+  s = s.replace(/```[\s\S]*?```/g, " ");
+  // inline code
+  s = s.replace(/`[^`]*`/g, " ");
+
+  // ---------- 2) 图片/链接 ----------
+  // image: ![alt](url) -> alt
+  s = s.replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1");
+  // link: [text](url) -> text
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1");
+  // autolink: <https://...> -> (删掉尖括号，仅留 URL 或可选择删掉 URL)
+  s = s.replace(/<((https?:\/\/|mailto:)[^>]+)>/g, "$1");
+
+  // ---------- 3) 标题/引用/列表 ----------
+  // headings: ### Title -> Title
+  s = s.replace(/^\s{0,3}#{1,6}\s+/gm, "");
+  // blockquote: > text -> text
+  s = s.replace(/^\s{0,3}>\s?/gm, "");
+  // unordered list: - item / * item / + item -> item
+  s = s.replace(/^\s*[-*+]\s+/gm, "");
+  // ordered list: 1. item -> item
+  s = s.replace(/^\s*\d+\.\s+/gm, "");
+
+  // ---------- 4) 强调/删除线（保留文字，去符号） ----------
+  // bold: **text** or __text__
+  s = s.replace(/\*\*([^*]+)\*\*/g, "$1");
+  s = s.replace(/__([^_]+)__/g, "$1");
+  // italic: *text* or _text_
+  // 注意：避免把下划线当作普通字符误伤，这里做保守匹配
+  s = s.replace(/\*([^*\n]+)\*/g, "$1");
+  s = s.replace(/_([^_\n]+)_/g, "$1");
+  // strikethrough: ~~text~~
+  s = s.replace(/~~([^~]+)~~/g, "$1");
+
+  // ---------- 5) 表格/分隔线 ----------
+  // 去掉表格分隔行: | --- | --- |
+  s = s.replace(/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/gm, " ");
+  // 表格竖线 -> 空格（保留单元格内容）
+  s = s.replace(/\|/g, " ");
+
+  // horizontal rule: --- / *** / ___
+  s = s.replace(/^\s*([-*_])\1{2,}\s*$/gm, " ");
+
+  // ---------- 6) 去 HTML 标签 ----------
+  s = s.replace(/<\/?[^>]+>/g, " ");
+
+  // ---------- 7) 处理常见 HTML 实体 ----------
+  s = s
+    .replace(/&nbsp;?/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+
+  // ---------- 8) 清理残留的 Markdown 噪声符号（保守） ----------
+  // 避免把中文标点清掉；这里只清理常见语法符号
+  s = s.replace(/[()[\]{}]/g, " ");      // 括号类（主要是 markdown 残留）
+  s = s.replace(/[*#~`]/g, " ");         // 星号/井号/波浪/反引号
+
+  // ---------- 9) 压缩空白 ----------
+  s = s.replace(/\s+/g, " ").trim();
+
+  return s;
+}
+
+// ========================================
+// ✅ 重叠去重：解决 chunk 不是纯 delta 时的重复朗读
+// ========================================
+function trimOverlap(prevTail: string, nextChunk: string, maxCheck = 160) {
+  if (!prevTail || !nextChunk) return nextChunk;
+
+  const tail = prevTail.slice(-maxCheck);
+  const max = Math.min(tail.length, nextChunk.length);
+
+  // 找最大重叠：tail 的后缀 == chunk 的前缀
+  for (let k = max; k >= 1; k--) {
+    if (tail.slice(-k) === nextChunk.slice(0, k)) {
+      return nextChunk.slice(k);
+    }
+  }
+  return nextChunk;
+}
+
+// ========================================
+// 流式：Markdown 代码过滤器（跨 chunk 状态机）
+// - 过滤 ``` fenced code ```
+// - 过滤 `inline code`
+// ========================================
+type FilterState = {
+  mode: "text" | "inline" | "fence";
+  tickRun: number;      // 连续反引号计数（跨 chunk）
+  fenceHeader: boolean; // 刚进入 fence 后，忽略语言行直到 '\n'
+};
+
+function createMarkdownCodeFilter() {
+  const st: FilterState = { mode: "text", tickRun: 0, fenceHeader: false };
+
+  const reset = () => {
+    st.mode = "text";
+    st.tickRun = 0;
+    st.fenceHeader = false;
+  };
+
+  const feed = (chunk: string) => {
+    if (!chunk) return "";
+    let out = "";
+
+    const flushTicks = () => {
+      if (st.tickRun <= 0) return;
+
+      if (st.mode === "text") {
+        if (st.tickRun >= 3) {
+          // 进入 fenced code
+          st.mode = "fence";
+          st.fenceHeader = true;
+        } else if (st.tickRun === 1) {
+          // 进入 inline code
+          st.mode = "inline";
+        } else {
+          // 两个反引号：当字面符号处理
+          out += "`".repeat(st.tickRun);
+        }
+      } else if (st.mode === "inline") {
+        // inline 内遇到反引号：结束 inline
+        st.mode = "text";
+      } else {
+        // fence 内：tickRun>=3 认为结束 fence
+        if (st.tickRun >= 3) {
+          st.mode = "text";
+          st.fenceHeader = false;
+        }
+      }
+      st.tickRun = 0;
+    };
+
+    for (let i = 0; i < chunk.length; i++) {
+      const ch = chunk[i];
+
+      if (ch === "`") {
+        st.tickRun += 1;
+        continue;
+      }
+
+      // 遇到非反引号，先处理累计的反引号
+      flushTicks();
+
+      // 刚进 fence：忽略 ```lang 直到换行
+      if (st.mode === "fence" && st.fenceHeader) {
+        if (ch === "\n") st.fenceHeader = false;
+        continue;
+      }
+
+      // text 模式输出；inline/fence 忽略
+      if (st.mode === "text") out += ch;
+    }
+
+    // chunk 结束，不 flush tickRun（留到下一 chunk 判断）
+    return out;
+  };
+
+  return { feed, reset };
+}
+
+// ========================================
+// 智能分段工具函数
+// ========================================
 function getEffectiveLength(text: string): number {
-  return text.replace(/\s/g, '').length;
+  return text.replace(/\s/g, "").length;
 }
 
 interface SegmentDecision {
@@ -52,77 +227,59 @@ function shouldSendTTSSegment(
   const trimmed = buffer.trim();
   const effectiveLen = getEffectiveLength(trimmed);
 
-  // 太短，继续等待
-  if (effectiveLen < minLength) {
-    return { shouldSend: false, reason: 'too_short' };
-  }
+  if (effectiveLen < minLength) return { shouldSend: false, reason: "too_short" };
+  if (effectiveLen >= maxLength) return { shouldSend: true, reason: "max_length" };
 
-  // 超长，强制发送
-  if (effectiveLen >= maxLength) {
-    return { shouldSend: true, reason: 'max_length' };
-  }
+  // 段落分隔
+  if (trimmed.includes("\n\n")) return { shouldSend: true, reason: "paragraph_separator" };
 
-  // ✅ 优先级1：检查是否包含段落分隔符 \n\n
-  if (trimmed.includes('\n\n')) {
-    return { shouldSend: true, reason: 'paragraph_separator' };
-  }
-
-  // ✅ 优先级2：检查是否包含完整句子标点（句号、问号、感叹号）
-  // 这是最重要的分段依据，优先级最高
+  // 句子结束（优先级最高）
   if (/[。！？.!?…]+/.test(trimmed) && effectiveLen >= sentenceLength) {
-    return { shouldSend: true, reason: 'sentence_end' };
+    return { shouldSend: true, reason: "sentence_end" };
   }
 
-  // ✅ 优先级3：检查是否包含逗号、顿号、分号（需要更长的长度）
+  // 逗号/顿号/分号（更长才触发）
   if (/[，、；,;]+/.test(trimmed) && effectiveLen >= pauseLength) {
-    return { shouldSend: true, reason: 'comma_pause' };
+    return { shouldSend: true, reason: "comma_pause" };
   }
 
-  // 继续等待更多内容
-  return { shouldSend: false, reason: 'waiting' };
+  return { shouldSend: false, reason: "waiting" };
 }
 
-// ✅ 核心函数：从缓冲区提取第一个完整分段
-// 关键改进：优先级严格按照 段落 > 句子 > 逗号，移除冒号分割，避免引号问题
+// 从缓冲区提取一个分段：段落 > 句子 > 逗号
 function extractSegment(buffer: string): [string, string] {
   const trimmed = buffer.trim();
-  
-  // ✅ 优先级1：按段落分隔符 \n\n 分割
-  const paragraphIdx = trimmed.indexOf('\n\n');
+
+  const paragraphIdx = trimmed.indexOf("\n\n");
   if (paragraphIdx !== -1) {
     const segment = trimmed.slice(0, paragraphIdx).trim();
     const remaining = trimmed.slice(paragraphIdx + 2).trim();
     return [segment, remaining];
   }
 
-  // ✅ 优先级2：按完整句子分割（句号、问号、感叹号）
-  // 这是最关键的分段点，确保完整句子不被打断
   const sentenceMatch = trimmed.match(/(.*?[。！？.!?…]+)/);
   if (sentenceMatch) {
-    const segment = sentenceMatch[1].trim();
+    const seg = sentenceMatch[1].trim();
     const remaining = trimmed.slice(sentenceMatch[1].length).trim();
-    return [segment, remaining];
+    return [seg, remaining];
   }
 
-  // ✅ 优先级3：按逗号、顿号、分号分割（需要足够长度，避免过度碎片化）
   const effectiveLen = getEffectiveLength(trimmed);
-  if (effectiveLen >= 50) { // 提高阈值，避免过早分割
+  if (effectiveLen >= 50) {
     const pauseMatch = trimmed.match(/(.*?[，、；,;]+)/);
     if (pauseMatch) {
-      const segment = pauseMatch[1].trim();
+      const seg = pauseMatch[1].trim();
       const remaining = trimmed.slice(pauseMatch[1].length).trim();
-      return [segment, remaining];
+      return [seg, remaining];
     }
   }
 
-  // ✅ 没有找到合适的分割点，返回全部内容
-  return [trimmed, ''];
+  return [trimmed, ""];
 }
 
 // ========================================
 // useTTS Hook
 // ========================================
-
 export default function useTTS(roleConfig: RoleTTSConfig) {
   const audioQueueRef = useRef<Map<number, HTMLAudioElement>>(new Map());
   const isPlayingRef = useRef(false);
@@ -142,17 +299,25 @@ export default function useTTS(roleConfig: RoleTTSConfig) {
   const audioUrlCacheRef = useRef<Map<string, CacheEntry>>(new Map());
   const inFlightRef = useRef<Map<string, Promise<string>>>(new Map());
 
-  // ✅ 流式分段缓冲区
+  // 流式缓冲区
   const streamBufferRef = useRef<{ buffer: string; timer: number | null }>({
-    buffer: '',
+    buffer: "",
     timer: null,
   });
 
-  const CACHE_TTL_MS = 60 * 60 * 1000; // 1小时
+  // ✅ 流式代码过滤器（跨 chunk 状态）
+  const codeFilterRef = useRef(createMarkdownCodeFilter());
+
+  // ✅ (1) overlap 去重：记录最近输出的尾巴
+  const lastTailRef = useRef<string>("");
+
+  // ✅ (2) timer token：防止 debounce 竞态重复发送
+  const timerTokenRef = useRef(0);
+
+  const CACHE_TTL_MS = 60 * 60 * 1000;
   const CACHE_MAX = 200;
 
   const normalizeText = (s: string) => s.replace(/\s+/g, " ").trim();
-
   const buildCacheKey = (message: string, cfg: RoleTTSConfig) => {
     const text = normalizeText(message);
     const voice = cfg.voice ?? "";
@@ -177,9 +342,8 @@ export default function useTTS(roleConfig: RoleTTSConfig) {
     for (const [k, v] of cache.entries()) {
       if (v.expiresAt <= now) cache.delete(k);
     }
-
     while (cache.size > CACHE_MAX) {
-      const firstKey = cache.keys().next().value;
+      const firstKey = cache.keys().next().value as string | undefined;
       if (!firstKey) break;
       cache.delete(firstKey);
     }
@@ -223,7 +387,6 @@ export default function useTTS(roleConfig: RoleTTSConfig) {
   const stop = useCallback(() => {
     generationRef.current += 1;
 
-    // 中止所有进行中的请求
     for (const [, c] of controllersRef.current.entries()) {
       try { c.abort(); } catch {}
     }
@@ -239,81 +402,72 @@ export default function useTTS(roleConfig: RoleTTSConfig) {
     nextPlaySeqRef.current = 1;
     isPlayingRef.current = false;
 
-    // ✅ 清理流式缓冲区
+    // 清理流式缓冲区
     if (streamBufferRef.current.timer) {
       window.clearTimeout(streamBufferRef.current.timer);
       streamBufferRef.current.timer = null;
     }
-    streamBufferRef.current.buffer = '';
+    streamBufferRef.current.buffer = "";
+
+    // ✅ 重置过滤器/去重/令牌
+    codeFilterRef.current.reset();
+    lastTailRef.current = "";
+    timerTokenRef.current += 1; // 让旧回调全部失效
   }, []);
 
-  const getOrCreateAudioUrl = useCallback(async (message: string, cfg: RoleTTSConfig, signal: AbortSignal) => {
-    pruneCache();
+  const getOrCreateAudioUrl = useCallback(
+    async (message: string, cfg: RoleTTSConfig, signal: AbortSignal) => {
+      pruneCache();
 
-    const key = buildCacheKey(message, cfg);
-    const now = Date.now();
+      const key = buildCacheKey(message, cfg);
+      const now = Date.now();
 
-    // 命中缓存
-    const cached = audioUrlCacheRef.current.get(key);
-    if (cached && cached.expiresAt > now) {
-      return cached.url;
-    }
+      const cached = audioUrlCacheRef.current.get(key);
+      if (cached && cached.expiresAt > now) return cached.url;
 
-    // 并发去重：如果已经有相同请求在进行中，直接等待
-    const inFlight = inFlightRef.current.get(key);
-    if (inFlight) {
-      return await inFlight;
-    }
+      const inFlight = inFlightRef.current.get(key);
+      if (inFlight) return await inFlight;
 
-    // 发起新请求
-    const p = (async () => {
-      const resp = await fetch("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal,
-        body: JSON.stringify({
-          message,
-          voice: cfg.voice,
-          speed: cfg.speed,
-          pitch: cfg.pitch,
-          style: cfg.style,
-        }),
-      });
+      const p = (async () => {
+        const resp = await fetch("/api/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal,
+          body: JSON.stringify({
+            message,
+            voice: cfg.voice,
+            speed: cfg.speed,
+            pitch: cfg.pitch,
+            style: cfg.style,
+          }),
+        });
 
-      if (!resp.ok) throw new Error("TTS request failed");
-      const { fileName } = await resp.json();
+        if (!resp.ok) throw new Error("TTS request failed");
+        const { fileName } = await resp.json();
+        const url = `/api/tts/audio/${fileName}`;
 
-      const url = `/api/tts/audio/${fileName}`;
+        audioUrlCacheRef.current.set(key, {
+          url,
+          expiresAt: Date.now() + CACHE_TTL_MS,
+        });
 
-      // 写入缓存
-      audioUrlCacheRef.current.set(key, {
-        url,
-        expiresAt: Date.now() + CACHE_TTL_MS,
-      });
+        return url;
+      })();
 
-      return url;
-    })();
+      inFlightRef.current.set(key, p);
+      try {
+        return await p;
+      } finally {
+        inFlightRef.current.delete(key);
+      }
+    },
+    []
+  );
 
-    inFlightRef.current.set(key, p);
+  const enqueue = useCallback(
+    async (message: string, opts: EnqueueOptions = {}) => {
+      if (!message?.trim()) return;
 
-    try {
-      return await p;
-    } finally {
-      // 无论成功失败，都要移除 inFlight 标记
-      inFlightRef.current.delete(key);
-    }
-  }, []);
-
-  const enqueue = useCallback(async (message: string, opts: EnqueueOptions = {}) => {
-    if (!message?.trim()) return;
-
-    const seq = ++ttsSeqRef.current;
-    const myGen = generationRef.current;
-
-    const controller = new AbortController();
-    controllersRef.current.set(seq, controller);
-
-    try {
       const base = configRef.current;
       const cfg: RoleTTSConfig = {
         voice: opts.voice ?? base.voice,
@@ -322,108 +476,155 @@ export default function useTTS(roleConfig: RoleTTSConfig) {
         style: opts.style ?? base.style,
       };
 
-      const audioUrl = await getOrCreateAudioUrl(message, cfg, controller.signal);
+      // ✅ 默认净化：只读文字，不读代码
+      const sanitize = opts.sanitize ?? true;
+      const finalText = sanitize ? sanitizeForTTS(message) : message;
+      if (!finalText.trim()) return;
 
-      // 如果期间被 stop 了，丢弃
-      if (myGen !== generationRef.current) return;
+      const seq = ++ttsSeqRef.current;
+      const myGen = generationRef.current;
+      const controller = new AbortController();
+      controllersRef.current.set(seq, controller);
 
-      const audio = new Audio(audioUrl);
-      audio.preload = "auto";
+      try {
+        const audioUrl = await getOrCreateAudioUrl(finalText, cfg, controller.signal);
+        if (myGen !== generationRef.current) return;
 
-      audioQueueRef.current.set(seq, audio);
-      tryPlayNext();
-    } catch (error: any) {
-      if (error?.name === "AbortError") {
+        const audio = new Audio(audioUrl);
+        audio.preload = "auto";
+        audioQueueRef.current.set(seq, audio);
+        tryPlayNext();
+      } catch (error: any) {
+        if (error?.name === "AbortError") {
+          markSeqFailedAndContinue(seq);
+          return;
+        }
+        console.error("TTS enqueue error:", error);
         markSeqFailedAndContinue(seq);
+      } finally {
+        controllersRef.current.delete(seq);
+      }
+    },
+    [getOrCreateAudioUrl, tryPlayNext, markSeqFailedAndContinue]
+  );
+
+  // ========================================
+  // ✅ 流式追加接口（智能分段 + 过滤代码 + overlap去重 + timer token）
+  // ========================================
+  const appendStream = useCallback(
+    (
+      chunk: string,
+      opts?: {
+        minLength?: number;
+        sentenceLength?: number;
+        maxLength?: number;
+        pauseLength?: number;
+        debounceMs?: number;
+        filterCode?: boolean;
+        debug?: boolean;
+      }
+    ) => {
+      const {
+        minLength = 15,
+        sentenceLength = 20,
+        maxLength = 150,
+        pauseLength = 50,
+        debounceMs = 500,
+        filterCode = true,
+        debug = false,
+      } = opts || {};
+
+      // 1) ✅ 过滤代码（支持跨 chunk）
+      const filtered = filterCode ? codeFilterRef.current.feed(chunk) : chunk;
+      if (!filtered) return;
+
+      // 2) ✅ overlap 去重（防止服务端 chunk 重叠/重复）
+      const deduped = trimOverlap(lastTailRef.current, filtered);
+      if (!deduped) {
+        // 仍要更新 tail（避免 tail 太旧），但 deduped 为空说明完全重叠
+        lastTailRef.current = (lastTailRef.current + filtered).slice(-240);
         return;
       }
-      console.error("TTS enqueue error:", error);
-      markSeqFailedAndContinue(seq);
-    } finally {
-      controllersRef.current.delete(seq);
-    }
-  }, [getOrCreateAudioUrl, tryPlayNext, markSeqFailedAndContinue]);
+      lastTailRef.current = (lastTailRef.current + deduped).slice(-240);
 
-  // ========================================
-  // ✅ 流式追加接口（智能分段）
-  // ========================================
-  const appendStream = useCallback((chunk: string, opts?: {
-    minLength?: number;
-    sentenceLength?: number;
-    maxLength?: number;
-    pauseLength?: number;
-    debounceMs?: number;
-  }) => {
-    const {
-      minLength = 15,
-      sentenceLength = 20,    // 降低句子长度要求，让完整句子更快发送
-      maxLength = 150,
-      pauseLength = 50,        // 提高逗号分割的长度要求
-      debounceMs = 500,        // 适当延长防抖时间，等待完整句子
-    } = opts || {};
+      // 3) 写入 buffer
+      streamBufferRef.current.buffer += deduped;
 
-    // ✅ 追加新内容到缓冲区
-    streamBufferRef.current.buffer += chunk;
-    // console.log("chunk:", JSON.stringify(chunk));
-    // console.log("buffer(before):", JSON.stringify(streamBufferRef.current.buffer.slice(-80)));
+      const decision = shouldSendTTSSegment(streamBufferRef.current.buffer, {
+        minLength,
+        sentenceLength,
+        maxLength,
+        pauseLength,
+      });
 
-    // ✅ 判断是否应该发送
-    const decision = shouldSendTTSSegment(streamBufferRef.current.buffer, {
-      minLength,
-      sentenceLength,
-      maxLength,
-      pauseLength,
-    });
-
-    if (decision.shouldSend) {
-      // ✅ 提取第一个完整分段
-      const [toSend, remaining] = extractSegment(streamBufferRef.current.buffer);
-      streamBufferRef.current.buffer = remaining;
-
-      // 清除防抖定时器
-      if (streamBufferRef.current.timer) {
-        window.clearTimeout(streamBufferRef.current.timer);
-        streamBufferRef.current.timer = null;
-      }
-
-      if (toSend) {
-        console.log(`[TTS Stream] ${decision.reason}: "${toSend.substring(0, 50)}${toSend.length > 50 ? '...' : ''}"`);
-        enqueue(toSend);
-      }
-    } else {
-      // ✅ 防抖：等待更多内容到达
-      if (streamBufferRef.current.timer) {
-        window.clearTimeout(streamBufferRef.current.timer);
-      }
-
-      streamBufferRef.current.timer = window.setTimeout(() => {
+      if (decision.shouldSend) {
+        // 立即发送：先提取 segment
         const [toSend, remaining] = extractSegment(streamBufferRef.current.buffer);
         streamBufferRef.current.buffer = remaining;
-        streamBufferRef.current.timer = null;
 
-        if (toSend) {
-          console.log(`[TTS Stream] timeout_flush: "${toSend.substring(0, 50)}${toSend.length > 50 ? '...' : ''}"`);
-          enqueue(toSend);
+        // 清 timer + 让旧回调全部失效
+        if (streamBufferRef.current.timer) {
+          window.clearTimeout(streamBufferRef.current.timer);
+          streamBufferRef.current.timer = null;
         }
-      }, debounceMs);
-    }
-  }, [enqueue]);
+        timerTokenRef.current += 1;
+
+        const clean = sanitizeForTTS(toSend);
+        if (clean) {
+          if (debug) {
+            console.log(
+              `[TTS Stream] ${decision.reason}: "${clean.slice(0, 60)}${clean.length > 60 ? "..." : ""}"`
+            );
+          }
+          enqueue(clean, { sanitize: false }); // 已净化，避免重复净化
+        }
+      } else {
+        // debounce flush：token 防竞态
+        if (streamBufferRef.current.timer) window.clearTimeout(streamBufferRef.current.timer);
+
+        timerTokenRef.current += 1;
+        const myToken = timerTokenRef.current;
+
+        streamBufferRef.current.timer = window.setTimeout(() => {
+          // ✅ 过期回调直接退出（避免 race 重复发送）
+          if (myToken !== timerTokenRef.current) return;
+
+          const [toSend, remaining] = extractSegment(streamBufferRef.current.buffer);
+          streamBufferRef.current.buffer = remaining;
+          streamBufferRef.current.timer = null;
+
+          const clean = sanitizeForTTS(toSend);
+          if (clean) {
+            if (debug) {
+              console.log(
+                `[TTS Stream] timeout_flush: "${clean.slice(0, 60)}${clean.length > 60 ? "..." : ""}"`
+              );
+            }
+            enqueue(clean, { sanitize: false });
+          }
+        }, debounceMs);
+      }
+    },
+    [enqueue]
+  );
 
   // ========================================
   // ✅ 刷新缓冲区（流式结束时调用）
   // ========================================
   const flushStream = useCallback(async () => {
+    // 取消 timer + 失效 token
     if (streamBufferRef.current.timer) {
       window.clearTimeout(streamBufferRef.current.timer);
       streamBufferRef.current.timer = null;
     }
+    timerTokenRef.current += 1;
 
     const remaining = streamBufferRef.current.buffer.trim();
-    streamBufferRef.current.buffer = '';
+    streamBufferRef.current.buffer = "";
 
-    if (remaining) {
-      console.log(`[TTS Stream] flush_remaining: "${remaining.substring(0, 50)}${remaining.length > 50 ? '...' : ''}"`);
-      await enqueue(remaining);
+    const clean = sanitizeForTTS(remaining);
+    if (clean) {
+      await enqueue(clean, { sanitize: false });
     }
   }, [enqueue]);
 
@@ -431,10 +632,10 @@ export default function useTTS(roleConfig: RoleTTSConfig) {
     return () => stop();
   }, [stop]);
 
-  return { 
-    enqueue,      // 直接入队完整文本
-    appendStream, // 流式追加（自动分段）
-    flushStream,  // 刷新剩余缓冲
-    stop,         // 停止播放
+  return {
+    enqueue,      // 入队（默认 sanitize：只读文字）
+    appendStream, // 流式追加（默认 filterCode + overlap去重 + token）
+    flushStream,
+    stop,
   } as const;
 }

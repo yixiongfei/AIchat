@@ -205,6 +205,7 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
                 maxLength: 150,
                 pauseLength: 60,
                 debounceMs: 500,
+                filterCode: true, 
               });
             }
           },

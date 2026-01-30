@@ -15,25 +15,7 @@ import useRoles from "./hooks/useRoles";
 import { CodePanelProvider, useCodePanel } from "./codepanel/CodePanelProvider";
 import CodePanelHost from "./codepanel/CodePanelHost";
 import MobileTopBar from "./components/MobileTopBar";
-
-function FloatingCodeButton() {
-  const { togglePanel } = useCodePanel();
-  return (
-    <button
-      onClick={togglePanel}
-      className={[
-        "fixed bottom-4 right-4 z-[60]",
-        "rounded-full p-3",
-        "bg-blue-600 hover:bg-blue-700",
-        "text-white shadow-lg shadow-black/30",
-        "transition-transform active:scale-95",
-      ].join(" ")}
-      title="Open Code Panel"
-    >
-      <Code2 size={20} />
-    </button>
-  );
-}
+import FloatingCodeButton from "./components/FloatingCodeButton";
 
 function AppInner() {
   const isMobile = useIsMobile(768);
@@ -72,6 +54,7 @@ function AppInner() {
   // CodePanel 布局：为了避免遮挡聊天区，可根据 open/width 给 chat 留出 marginRight
   const { open: codeOpen, width: codeWidth } = useCodePanel();
 
+  const [Open, setOpen] = useState<boolean>(false);
   const handleSelectRole = (role: any) => {
     setSelectedRole(role);
     if (isMobile) setSidebarOpen(false);
@@ -233,8 +216,8 @@ function AppInner() {
       {/* ✅ 全局代码面板 Host（唯一实例） */}
       <CodePanelHost />
 
-      {/* ✅ 浮动按钮（控制同一个面板，不会再跟 App 内部状态打架） */}
-      <FloatingCodeButton />
+      {/* ✅ 浮动按钮（控制同一个面板） */}
+      <FloatingCodeButton togglePanel={() => setOpen(prev => !prev)} />
     </div>
   );
 }

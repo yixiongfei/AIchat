@@ -87,7 +87,11 @@ export function CodeSidePanel({
           open ? "translate-x-0 pointer-events-auto" : "translate-x-full pointer-events-none",
         ].join(" ")}
         style={{ width }}
-        aria-hidden={!open}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        aria-hidden={open ? "false" : "true"}
+
       >
         {/* 拖拽条 */}
         <div
