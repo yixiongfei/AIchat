@@ -51,31 +51,31 @@ export const RoleList: React.FC<RoleListProps> = ({
                   'transition-colors rounded-xl mx-2',
                   'hover:bg-slate-100 dark:hover:bg-slate-800/60',
                 ].join(' ')}
-            >
-              {/* Icon / Avatar */}
-              <div className="shrink-0">
-                {role.avatar && !failedAvatars[role.id] ? (
-                  <img
-                    src={role.avatar}
-                    alt={role.name}
-                    className="h-8 w-8 rounded-full object-cover"
-                    onError={() => setFailedAvatars((s) => ({ ...s, [role.id]: true }))}
-                  />
-                ) : (
-                  <UserCircle size={34} className={['text-slate-400'].join(' ')} />
-                )}
-              </div>
+              >
+                {/* Icon / Avatar */}
+                <div className="shrink-0">
+                  {role.avatar && !failedAvatars[role.id] ? (
+                    <img
+                      src={role.avatar}
+                      alt={role.name}
+                      className="h-8 w-8 rounded-full object-cover"
+                      onError={() => setFailedAvatars((s) => ({ ...s, [role.id]: true }))}
+                    />
+                  ) : (
+                    <UserCircle size={34} className={['text-slate-400'].join(' ')} />
+                  )}
+                </div>
 
-              {/* Text */}
-              <div className="flex-1 min-w-0">
-                <p
-                  className={[
-                    'font-medium truncate',
-                  ].join(' ')}
-                >
-                  {role.name}
-                </p>
-              </div>
+                {/* Text */}
+                <div className="flex-1 min-w-0">
+                  <p
+                    className={[
+                      'font-medium truncate',
+                    ].join(' ')}
+                  >
+                    {role.name}
+                  </p>
+                </div>
               </button>
               <div className="pr-2">
                 <button
@@ -84,7 +84,7 @@ export const RoleList: React.FC<RoleListProps> = ({
                   title="Edit"
                 >
                   {/* simple pencil icon using SVG */}
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-500"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-500"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" /></svg>
                 </button>
               </div>
             </div>

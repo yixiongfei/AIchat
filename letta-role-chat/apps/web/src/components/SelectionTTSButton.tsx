@@ -3,12 +3,12 @@ import { useTextSelectionTTS } from '../hooks/useTextSelectionTTS';
 
 interface Props {
   containerRef: React.RefObject<HTMLElement>;
-    roleConfig: {
+  roleConfig: {
     voice?: string;
     speed?: number;
     pitch?: string;
     style?: string;
-    };
+  };
 }
 
 export default function SelectionTTSButton({ containerRef, roleConfig }: Props) {
