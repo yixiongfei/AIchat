@@ -1,6 +1,5 @@
-
 import { useRef, useState } from "react";
-import { RefreshCw, Moon, Sun, X, Code2 } from "lucide-react";
+import { RefreshCw, Moon, Sun, X } from "lucide-react";
 
 import { RoleList } from "./components/RoleList";
 import { RoleEditor } from "./components/RoleEditor";
@@ -51,10 +50,9 @@ function AppInner() {
   const chatWindowRef = useRef<any>(null);
   const [autoSpeak, setAutoSpeak] = useState(false);
 
-  // CodePanel 布局：为了避免遮挡聊天区，可根据 open/width 给 chat 留出 marginRight
-  const { open: codeOpen, width: codeWidth } = useCodePanel();
+  // ✅ 从 CodePanel Context 获取状态和控制函数
+  const { open: codeOpen, width: codeWidth, togglePanel } = useCodePanel();
 
-  const [Open, setOpen] = useState<boolean>(false);
   const handleSelectRole = (role: any) => {
     setSelectedRole(role);
     if (isMobile) setSidebarOpen(false);
@@ -151,7 +149,6 @@ function AppInner() {
       <aside
         className="flex-1 min-w-0 h-screen border-l border-slate-800/60 bg-slate-950 text-slate-100 relative flex flex-col"
         style={{
-          // ✅ 代码面板打开时给右侧留空间，避免遮挡（以前你在 App 里用 artifactOpen/artifactWidth 做这件事）
           marginRight: !isMobile && codeOpen ? `${codeWidth}px` : undefined,
         }}
       >
@@ -216,8 +213,8 @@ function AppInner() {
       {/* ✅ 全局代码面板 Host（唯一实例） */}
       <CodePanelHost />
 
-      {/* ✅ 浮动按钮（控制同一个面板） */}
-      <FloatingCodeButton togglePanel={() => setOpen(prev => !prev)} />
+      {/* ✅ 浮动按钮 - 直接传递 Context 中的 togglePanel */}
+      <FloatingCodeButton togglePanel={togglePanel} />
     </div>
   );
 }

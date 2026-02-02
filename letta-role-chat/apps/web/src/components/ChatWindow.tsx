@@ -1,4 +1,3 @@
-
 import React, {
   useState,
   useRef,
@@ -7,7 +6,7 @@ import React, {
   useImperativeHandle,
 } from "react";
 import { Role, Message } from "../types";
-import { Send, Loader2 } from "lucide-react";
+import { Send, Loader2, Plus, Mic, X, ImageIcon } from "lucide-react";
 import { api } from "../services/api";
 import useTTS from "../hooks/useTTS";
 import {
@@ -36,8 +35,6 @@ interface ChatWindowProps {
   showHeader?: boolean;
   defaultAutoSpeak?: boolean;
   onAutoSpeakChange?: (value: boolean) => void;
-
-  // ✅ 长代码自动打开侧边栏（默认 true）
   autoOpenLongCode?: boolean;
 }
 
@@ -45,6 +42,12 @@ export interface ChatWindowHandle {
   toggleAutoSpeak: () => void;
   stopSpeak: () => void;
   clearHistory: () => Promise<void>;
+}
+
+interface UploadedImage {
+  id: string;
+  file: File;
+  preview: string;
 }
 
 export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
@@ -70,20 +73,20 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState("");
     const [isLoading, setIsLoading] = useState(false);
+    const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const [autoSpeak, setAutoSpeak] = useState(defaultAutoSpeak);
-
-    // 每条消息是否展开：key=msg.id
     const [expandedMap, setExpandedMap] = useState<Record<string, boolean>>({});
 
     const toggleExpanded = (id: string) => {
       setExpandedMap((prev) => ({ ...prev, [id]: !prev[id] }));
     };
 
-    // 同步 autoSpeak
     useEffect(() => {
       setAutoSpeak(defaultAutoSpeak);
     }, [defaultAutoSpeak]);
@@ -143,27 +146,88 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
       }
     }, [messages]);
 
+    // 自动调整 textarea 高度
+    useEffect(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+
+      textarea.style.height = "auto";
+      const newHeight = Math.min(Math.max(textarea.scrollHeight, 56), 160);
+      textarea.style.height = `${newHeight}px`;
+    }, [input]);
+
     // 卸载清理
     useEffect(() => {
       return () => {
         clearWaifuTimers();
         stop();
+        // 清理图片预览 URL
+        uploadedImages.forEach((img) => URL.revokeObjectURL(img.preview));
       };
-    }, [stop]);
+    }, [stop, uploadedImages]);
+
+    // 处理图片上传
+    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (!files) return;
+
+      const newImages: UploadedImage[] = [];
+      
+      Array.from(files).forEach((file) => {
+        // 验证文件类型
+        if (!file.type.startsWith("image/")) {
+          showWaifuMessage("请上传图片文件", 3000, 20, true);
+          return;
+        }
+
+        // 验证文件大小 (10MB)
+        if (file.size > 10 * 1024 * 1024) {
+          showWaifuMessage("图片大小不能超过 10MB", 3000, 20, true);
+          return;
+        }
+
+        const id = `img-${Date.now()}-${Math.random()}`;
+        const preview = URL.createObjectURL(file);
+        newImages.push({ id, file, preview });
+      });
+
+      setUploadedImages((prev) => [...prev, ...newImages]);
+      
+      // 重置 input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    };
+
+    // 删除图片
+    const removeImage = (id: string) => {
+      setUploadedImages((prev) => {
+        const img = prev.find((i) => i.id === id);
+        if (img) {
+          URL.revokeObjectURL(img.preview);
+        }
+        return prev.filter((i) => i.id !== id);
+      });
+    };
 
     const handleSend = async () => {
-      if (!input.trim() || isLoading) return;
+      if ((!input.trim() && uploadedImages.length === 0) || isLoading) return;
 
       const contentToSend = input.trim();
+      const imagesToSend = [...uploadedImages];
+
       const userMsg: Message = {
         id: "user-" + Date.now(),
         role: "user",
         content: contentToSend,
         timestamp: Date.now(),
+        // 如果需要在消息中显示图片，可以添加 images 字段
+        images: imagesToSend.map(img => img.preview),
       };
 
       setMessages((prev) => [...prev, userMsg]);
       setInput("");
+      setUploadedImages([]);
       setIsLoading(true);
 
       showWaifuMessage("让我想想…", 2000, 9, true);
@@ -172,6 +236,7 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
       let assistantContent = "";
 
       try {
+        // TODO: 如果 API 支持图片，需要将 imagesToSend 一起发送
         await api.sendMessageStream(
           role.id,
           contentToSend,
@@ -205,24 +270,29 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
                 maxLength: 150,
                 pauseLength: 60,
                 debounceMs: 500,
-                filterCode: true, 
+                filterCode: true,
               });
             }
           },
           async () => {
             setIsLoading(false);
 
-            // waifu 提示用“去代码摘要”，避免刷屏
             const brief = previewText(stripAllFencedCodes(assistantContent), 220);
             if (assistantContent.trim()) showWaifuMessage(brief || "已完成", 6000, 10, true);
 
             if (autoSpeak) await flushStream();
+            
+            // 清理已发送的图片预览
+            imagesToSend.forEach((img) => URL.revokeObjectURL(img.preview));
           }
         );
       } catch (error) {
         console.error("Chat error:", error);
         setIsLoading(false);
         showWaifuMessage("好像出错了…要不要再试一次?", 5000, 20, true);
+        
+        // 清理图片
+        imagesToSend.forEach((img) => URL.revokeObjectURL(img.preview));
       }
     };
 
@@ -331,8 +401,65 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
 
         <div className={cn("shrink-0 px-4 py-4", inputBarClassName)}>
           <div className="mx-auto w-full max-w-[1100px]">
-            <div className="flex items-end gap-2">
+            {/* 图片预览区域 */}
+            {uploadedImages.length > 0 && (
+              <div className="mb-3 flex flex-wrap gap-2">
+                {uploadedImages.map((img) => (
+                  <div
+                    key={img.id}
+                    className="relative group rounded-lg overflow-hidden border border-slate-700/50"
+                  >
+                    <img
+                      src={img.preview}
+                      alt="Upload preview"
+                      className="h-20 w-20 object-cover"
+                    />
+                    <button
+                      onClick={() => removeImage(img.id)}
+                      className="absolute top-1 right-1 p-1 rounded-full bg-slate-900/80 text-slate-100 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+                      title="删除图片"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 输入框容器 */}
+            <div
+              className={cn(
+                "relative flex items-end gap-2 rounded-2xl px-3 py-2",
+                inputClassName
+              )}
+            >
+              {/* 隐藏的文件输入 */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleImageUpload}
+                className="hidden"
+              />
+
+              {/* 左侧按钮组 */}
+              <div className="flex items-center gap-1 pb-2">
+                {/* 上传图片按钮 */}
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isLoading}
+                  className="p-2 rounded-full hover:bg-slate-800/50 transition-colors text-slate-400 hover:text-slate-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="上传图片"
+                >
+                  <Plus size={20} />
+                </button>
+
+              </div>
+
+              {/* 输入框 */}
               <textarea
+                ref={textareaRef}
                 value={input}
                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
                   setInput(e.target.value)
@@ -344,26 +471,32 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
                   }
                 }}
                 placeholder={`Message ${role.name}...`}
-                rows={2}
-                className={cn(
-                  "flex-1 resize-none rounded-2xl px-4 py-3 text-sm outline-none",
-                  "min-h-[56px] max-h-[160px]",
-                  inputClassName
-                )}
+                className="flex-1 resize-none bg-transparent text-sm outline-none min-h-[40px] max-h-[120px] py-2 text-slate-100 placeholder:text-slate-400"
+                style={{ height: "40px" }}
               />
 
-              <button
-                onClick={handleSend}
-                disabled={isLoading || !input.trim()}
-                className={cn(
-                  "h-12 w-12 rounded-2xl inline-flex items-center justify-center transition",
-                  "disabled:opacity-50 disabled:cursor-not-allowed",
-                  sendButtonClassName
-                )}
-                title="Send"
-              >
-                {isLoading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
-              </button>
+              {/* 发送按钮 */}
+              <div className="pb-2">
+                <button
+                  onClick={handleSend}
+                  disabled={isLoading || (!input.trim() && uploadedImages.length === 0)}
+                  className={cn(
+                    "p-2.5 rounded-full inline-flex items-center justify-center transition-all",
+                    "disabled:opacity-50 disabled:cursor-not-allowed",
+                    sendButtonClassName,
+                    (!input.trim() && uploadedImages.length === 0) || isLoading
+                      ? "opacity-50"
+                      : "hover:scale-105"
+                  )}
+                  title="发送"
+                >
+                  {isLoading ? (
+                    <Loader2 size={20} className="animate-spin" />
+                  ) : (
+                    <Send size={20} />
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
