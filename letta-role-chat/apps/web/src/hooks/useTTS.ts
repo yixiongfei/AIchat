@@ -576,6 +576,8 @@ export default function useTTS(roleConfig: RoleTTSConfig) {
               `[TTS Stream] ${decision.reason}: "${clean.slice(0, 60)}${clean.length > 60 ? "..." : ""}"`
             );
           }
+          // ✅ 重要：更新 lastTailRef 为已发送的内容，防止重复
+          lastTailRef.current = toSend.slice(-240);
           enqueue(clean, { sanitize: false }); // 已净化，避免重复净化
         }
       } else {
@@ -600,6 +602,8 @@ export default function useTTS(roleConfig: RoleTTSConfig) {
                 `[TTS Stream] timeout_flush: "${clean.slice(0, 60)}${clean.length > 60 ? "..." : ""}"`
               );
             }
+            // ✅ 重要：更新 lastTailRef 为已发送的内容，防止重复
+            lastTailRef.current = toSend.slice(-240);
             enqueue(clean, { sanitize: false });
           }
         }, debounceMs);
@@ -624,6 +628,8 @@ export default function useTTS(roleConfig: RoleTTSConfig) {
 
     const clean = sanitizeForTTS(remaining);
     if (clean) {
+      // ✅ 重要：更新 lastTailRef 为已发送的内容，防止重复
+      lastTailRef.current = remaining.slice(-240);
       await enqueue(clean, { sanitize: false });
     }
   }, [enqueue]);
