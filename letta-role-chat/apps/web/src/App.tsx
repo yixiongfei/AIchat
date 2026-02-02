@@ -147,7 +147,7 @@ function AppInner() {
 
       {/* 右侧聊天区 */}
       <aside
-        className="flex-1 min-w-0 h-screen border-l border-slate-800/60 bg-slate-950 text-slate-100 relative flex flex-col"
+        className="flex-1 min-w-0 h-screen border-l border-slate-200 bg-white text-slate-900 dark:border-slate-800/60 dark:bg-slate-950 dark:text-slate-100 relative flex flex-col"
         style={{
           marginRight: !isMobile && codeOpen ? `${codeWidth}px` : undefined,
         }}
@@ -171,20 +171,21 @@ function AppInner() {
               showHeader={!isMobile}
               defaultAutoSpeak={autoSpeak}
               onAutoSpeakChange={setAutoSpeak}
-              headerClassName="border-b border-slate-800/60 bg-slate-950/70 backdrop-blur sticky top-0 z-10"
-              bodyClassName="bg-gradient-to-b from-slate-950 to-slate-950"
+              headerClassName="border-b border-slate-200 bg-white/70 backdrop-blur sticky top-0 z-10 dark:border-slate-800/60 dark:bg-slate-950/70"
+              bodyClassName="bg-gradient-to-b from-white to-slate-50 dark:from-slate-950 dark:to-slate-950"
               bodyInnerClassName="max-w-[1000px]"
-              inputBarClassName="border-t border-slate-800/60 bg-slate-950/70 backdrop-blur"
+              inputBarClassName="border-t border-slate-200 bg-white/70 backdrop-blur dark:border-slate-800/60 dark:bg-slate-950/70"
               inputClassName="
-                bg-slate-900/60 text-slate-100 ring-1 ring-slate-700/50
+                bg-white text-slate-900 ring-1 ring-slate-300
                 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500/60
+                dark:bg-slate-900/60 dark:text-slate-100 dark:ring-slate-700/50
               "
               sendButtonClassName="bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
               userBubbleClassName="bg-blue-600 text-white"
-              assistantBubbleClassName="bg-slate-900/70 text-slate-100 ring-1 ring-slate-800"
+              assistantBubbleClassName="bg-slate-100 text-slate-900 ring-1 ring-slate-200 dark:bg-slate-900/70 dark:text-slate-100 dark:ring-slate-800"
             />
           ) : (
-            <div className="h-full flex items-center justify-center text-slate-400">
+            <div className="h-full flex items-center justify-center text-slate-500 dark:text-slate-400">
               请选择一个角色
             </div>
           )}
