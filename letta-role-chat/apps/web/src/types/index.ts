@@ -17,6 +17,7 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
+  images?: string[]; // ✅ 添加图片支持
 }
 
 export interface Conversation {

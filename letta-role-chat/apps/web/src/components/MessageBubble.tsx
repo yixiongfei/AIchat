@@ -1,4 +1,3 @@
-
 // src/components/MessageBubble.tsx
 import React, { useMemo } from "react";
 import { Message, Role } from "../types";
@@ -55,6 +54,30 @@ export default function MessageBubble(props: {
                         : cn("rounded-tl-md", assistantBubbleClassName)
                 )}
             >
+                {/* ✅ 显示图片（如果有） */}
+                {msg.images && msg.images.length > 0 && (
+                    <div className="mb-2 grid grid-cols-2 gap-2 max-w-md">
+                        {msg.images.map((imageUrl, index) => (
+                            <div
+                                key={index}
+                                className="relative rounded-lg overflow-hidden border border-slate-700/50 hover:border-slate-600 transition-colors cursor-pointer"
+                                onClick={() => {
+                                    // 点击图片放大查看
+                                    window.open(imageUrl, '_blank');
+                                }}
+                            >
+                                <img
+                                    src={imageUrl}
+                                    alt={`Uploaded image ${index + 1}`}
+                                    className="w-full h-auto object-cover"
+                                    loading="lazy"
+                                />
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {/* 文本内容 */}
                 {!collapse ? (
                     isUser ? (
                         <p className="whitespace-pre-wrap break-words">{msg.content}</p>

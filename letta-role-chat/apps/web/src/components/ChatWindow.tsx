@@ -6,7 +6,7 @@ import React, {
   useImperativeHandle,
 } from "react";
 import { Role, Message } from "../types";
-import { Send, Loader2, Plus, Mic, X, ImageIcon } from "lucide-react";
+import { Send, Loader2, Plus, X } from "lucide-react";
 import { api } from "../services/api";
 import useTTS from "../hooks/useTTS";
 import {
@@ -125,7 +125,6 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
       [role?.id, stop, autoSpeak]
     );
 
-    // 加载历史
     useEffect(() => {
       const loadHistory = async () => {
         setMessages([]);
@@ -139,48 +138,39 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
       loadHistory();
     }, [role.id]);
 
-    // 自动滚动到底部
     useEffect(() => {
       if (scrollRef.current) {
         scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
       }
     }, [messages]);
 
-    // 自动调整 textarea 高度
     useEffect(() => {
       const textarea = textareaRef.current;
       if (!textarea) return;
-
       textarea.style.height = "auto";
-      const newHeight = Math.min(Math.max(textarea.scrollHeight, 56), 160);
+      const newHeight = Math.min(Math.max(textarea.scrollHeight, 40), 120);
       textarea.style.height = `${newHeight}px`;
     }, [input]);
 
-    // 卸载清理
     useEffect(() => {
       return () => {
         clearWaifuTimers();
         stop();
-        // 清理图片预览 URL
         uploadedImages.forEach((img) => URL.revokeObjectURL(img.preview));
       };
     }, [stop, uploadedImages]);
 
-    // 处理图片上传
     const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
       if (!files) return;
 
       const newImages: UploadedImage[] = [];
-      
+
       Array.from(files).forEach((file) => {
-        // 验证文件类型
         if (!file.type.startsWith("image/")) {
           showWaifuMessage("请上传图片文件", 3000, 20, true);
           return;
         }
-
-        // 验证文件大小 (10MB)
         if (file.size > 10 * 1024 * 1024) {
           showWaifuMessage("图片大小不能超过 10MB", 3000, 20, true);
           return;
@@ -192,20 +182,13 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
       });
 
       setUploadedImages((prev) => [...prev, ...newImages]);
-      
-      // 重置 input
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+      if (fileInputRef.current) fileInputRef.current.value = "";
     };
 
-    // 删除图片
     const removeImage = (id: string) => {
       setUploadedImages((prev) => {
         const img = prev.find((i) => i.id === id);
-        if (img) {
-          URL.revokeObjectURL(img.preview);
-        }
+        if (img) URL.revokeObjectURL(img.preview);
         return prev.filter((i) => i.id !== id);
       });
     };
@@ -221,8 +204,7 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
         role: "user",
         content: contentToSend,
         timestamp: Date.now(),
-        // 如果需要在消息中显示图片，可以添加 images 字段
-        images: imagesToSend.map(img => img.preview),
+        images: imagesToSend.map((img) => img.preview),
       };
 
       setMessages((prev) => [...prev, userMsg]);
@@ -236,13 +218,11 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
       let assistantContent = "";
 
       try {
-        // TODO: 如果 API 支持图片，需要将 imagesToSend 一起发送
         await api.sendMessageStream(
           role.id,
           contentToSend,
           (chunk) => {
             assistantContent += chunk;
-
             setMessages((prev) => {
               const other = prev.filter((m) => m.id !== assistantMsgId);
               return [
@@ -276,13 +256,10 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
           },
           async () => {
             setIsLoading(false);
-
             const brief = previewText(stripAllFencedCodes(assistantContent), 220);
-            if (assistantContent.trim()) showWaifuMessage(brief || "已完成", 6000, 10, true);
-
+            if (assistantContent.trim())
+              showWaifuMessage(brief || "已完成", 6000, 10, true);
             if (autoSpeak) await flushStream();
-            
-            // 清理已发送的图片预览
             imagesToSend.forEach((img) => URL.revokeObjectURL(img.preview));
           }
         );
@@ -290,8 +267,6 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
         console.error("Chat error:", error);
         setIsLoading(false);
         showWaifuMessage("好像出错了…要不要再试一次?", 5000, 20, true);
-        
-        // 清理图片
         imagesToSend.forEach((img) => URL.revokeObjectURL(img.preview));
       }
     };
@@ -305,21 +280,17 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
                 <div className="font-semibold truncate">{role.name}</div>
                 <div className="text-xs opacity-70">Online</div>
               </div>
-
               <div className="flex items-center gap-2 shrink-0">
                 <button
                   onClick={() => handleAutoSpeakChange(!autoSpeak)}
                   className={cn(
                     "text-xs px-2 py-1 rounded-md ring-1 ring-current/20 transition",
-                    autoSpeak
-                      ? "bg-primary/10 opacity-100"
-                      : "opacity-60 hover:opacity-100"
+                    autoSpeak ? "bg-primary/10 opacity-100" : "opacity-60 hover:opacity-100"
                   )}
                   title="Auto Speak"
                 >
                   {autoSpeak ? "自动朗读:开" : "自动朗读:关"}
                 </button>
-
                 <button
                   onClick={stop}
                   className="text-xs px-2 py-1 rounded-md ring-1 ring-current/20 opacity-60 hover:opacity-100 transition"
@@ -327,7 +298,6 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
                 >
                   停止
                 </button>
-
                 <button
                   onClick={async () => {
                     if (!role?.id) return;
@@ -347,7 +317,6 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
                 >
                   清空历史
                 </button>
-
                 <div className="text-xs opacity-60">{messages.length} msgs</div>
               </div>
             </div>
@@ -369,25 +338,18 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
                   autoOpenLongCode={autoOpenLongCode}
                 />
               ))}
-
               {isLoading &&
                 !messages.some(
                   (m) => m.role === "assistant" && m.id.startsWith("assistant-")
                 ) && (
                   <div className="flex justify-start">
-                    <div
-                      className={cn(
-                        "rounded-2xl rounded-tl-md px-4 py-3",
-                        assistantBubbleClassName
-                      )}
-                    >
+                    <div className={cn("rounded-2xl rounded-tl-md px-4 py-3", assistantBubbleClassName)}>
                       <Loader2 className="animate-spin opacity-70" size={18} />
                     </div>
                   </div>
                 )}
             </div>
           </div>
-
           <SelectionTTSButton
             containerRef={containerRef}
             roleConfig={{
@@ -401,7 +363,6 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
 
         <div className={cn("shrink-0 px-4 py-4", inputBarClassName)}>
           <div className="mx-auto w-full max-w-[1100px]">
-            {/* 图片预览区域 */}
             {uploadedImages.length > 0 && (
               <div className="mb-3 flex flex-wrap gap-2">
                 {uploadedImages.map((img) => (
@@ -426,14 +387,7 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
               </div>
             )}
 
-            {/* 输入框容器 */}
-            <div
-              className={cn(
-                "relative flex items-end gap-2 rounded-2xl px-3 py-2",
-                inputClassName
-              )}
-            >
-              {/* 隐藏的文件输入 */}
+            <div className={cn("relative flex items-end gap-2 rounded-2xl px-3 py-2", inputClassName)}>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -441,11 +395,9 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
                 multiple
                 onChange={handleImageUpload}
                 className="hidden"
+                aria-label="上传图片"
               />
-
-              {/* 左侧按钮组 */}
-              <div className="flex items-center gap-1 pb-2">
-                {/* 上传图片按钮 */}
+              <div className="flex items-center pb-2">
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isLoading}
@@ -454,10 +406,7 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
                 >
                   <Plus size={20} />
                 </button>
-
               </div>
-
-              {/* 输入框 */}
               <textarea
                 ref={textareaRef}
                 value={input}
@@ -474,8 +423,6 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
                 className="flex-1 resize-none bg-transparent text-sm outline-none min-h-[40px] max-h-[120px] py-2 text-slate-100 placeholder:text-slate-400"
                 style={{ height: "40px" }}
               />
-
-              {/* 发送按钮 */}
               <div className="pb-2">
                 <button
                   onClick={handleSend}

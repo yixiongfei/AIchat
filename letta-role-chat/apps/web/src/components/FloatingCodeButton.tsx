@@ -17,12 +17,10 @@ export default function FloatingCodeButton({
   const hasMoved = useRef(false);
   const pointerIdRef = useRef<number | null>(null);
 
-  // 初始化位置
   useEffect(() => {
     setPosition({ x: window.innerWidth - 80, y: window.innerHeight - 80 });
   }, []);
 
-  // 限制在视口内
   const clampToViewport = useCallback((x: number, y: number) => {
     const el = buttonRef.current;
     if (!el) return { x, y };
@@ -33,17 +31,16 @@ export default function FloatingCodeButton({
     };
   }, []);
 
-  // 指针移动处理
   const onPointerMove = useCallback(
     (e: PointerEvent) => {
       if (!dragging.current) return;
-      if (pointerIdRef.current !== null && e.pointerId !== pointerIdRef.current) return;
+      if (pointerIdRef.current !== null && e.pointerId !== pointerIdRef.current)
+        return;
 
       const dx = e.clientX - startPointer.current.x;
       const dy = e.clientY - startPointer.current.y;
       const distance = Math.sqrt(dx * dx + dy * dy);
-      
-      // 如果移动超过 5px，标记为已移动
+
       if (distance > 5) {
         hasMoved.current = true;
       }
@@ -54,7 +51,6 @@ export default function FloatingCodeButton({
       const next = clampToViewport(newX, newY);
       setPosition(next);
 
-      // 阻止默认行为
       if (e.cancelable) {
         e.preventDefault();
       }
@@ -62,7 +58,6 @@ export default function FloatingCodeButton({
     [clampToViewport]
   );
 
-  // 结束拖拽
   const endDrag = useCallback(() => {
     dragging.current = false;
     pointerIdRef.current = null;
@@ -71,13 +66,12 @@ export default function FloatingCodeButton({
     window.removeEventListener("pointercancel", endDrag);
   }, [onPointerMove]);
 
-  // 指针按下
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLButtonElement>) => {
       if (e.button !== 0) return;
 
       dragging.current = true;
-      hasMoved.current = false; // 重置移动标记
+      hasMoved.current = false;
       pointerIdRef.current = e.pointerId;
 
       startPointer.current = { x: e.clientX, y: e.clientY };
@@ -95,23 +89,21 @@ export default function FloatingCodeButton({
     [position.x, position.y, onPointerMove, endDrag]
   );
 
-  // 点击处理
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
-      // 如果发生了拖动，阻止点击
       if (hasMoved.current) {
         e.preventDefault();
         e.stopPropagation();
+        hasMoved.current = false;
         return;
       }
-      
-      // 没有拖动，触发 togglePanel
+
+      // ✅ 没有拖动，触发 togglePanel
       togglePanel();
     },
     [togglePanel]
   );
 
-  // 清理事件监听器
   useEffect(() => {
     return () => {
       window.removeEventListener("pointermove", onPointerMove);
