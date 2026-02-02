@@ -81,7 +81,7 @@ const UserCodeCard = React.memo(function UserCodeCard({
         type="button"
         className="w-full flex items-center justify-between px-3 py-2 bg-slate-600/30 hover:bg-slate-600/50 transition text-left"
         onClick={toggle}
-        aria-expanded={!collapsed ? "true" : "false"}  // ✅ axe 100% 通过
+        aria-expanded={!collapsed ? "true" : "false"} 
         aria-label={`切换代码块 ${language} 展开/折叠`}
       >
         <div className="flex items-center gap-2 text-sm text-slate-200">

@@ -9,6 +9,7 @@
 - ✅ **Live2D 集成**：桌面端动画角色显示
 - ✅ **代码高亮**：长代码块自动在侧边栏显示并支持语法高亮
 - ✅ **图片上传**：对话中支持图片上传
+- ✅ **长文本粘贴**：超长文本自动转为附件上传（>2000字符或>50行）
 - ✅ **响应式设计**：移动端和桌面端优化
 - ✅ **深色/浅色主题**：主题切换并支持系统偏好检测
 - ✅ **实时流式传输**：流式消息响应
@@ -20,42 +21,45 @@
 ```
 apps/web/src/
 ├── components/          # React 组件
-│   ├── AssistantMessageContent.tsx
-│   ├── ChatWindow.tsx   # 主聊天界面
-│   ├── CodeArtifactCard.tsx
-│   ├── CodeSidePanel.tsx
-│   ├── FloatingCodeButton.tsx
-│   ├── Markdown.tsx
-│   ├── MessageBubble.tsx
-│   ├── MobileTopBar.tsx
-│   ├── RoleEditor.tsx
-│   ├── RoleList.tsx
-│   └── SelectionTTSButton.tsx
+│   ├── AssistantMessageContent.tsx  # AI 回复内容渲染
+│   ├── ChatWindow.tsx   # 主聊天界面（使用 useChatStream）
+│   ├── CodeArtifactCard.tsx         # 代码卡片组件
+│   ├── CodeSidePanel.tsx            # 代码侧边栏
+│   ├── CodeSidePanelHost.tsx        # 侧边栏宿主
+│   ├── ComposerPreview.tsx          # 输入预览区（图片+代码+文本附件）
+│   ├── FloatingCodeButton.tsx       # 浮动代码按钮
+│   ├── Markdown.tsx                 # Markdown 渲染
+│   ├── MessageBubble.tsx            # 消息气泡
+│   ├── MobileTopBar.tsx             # 移动端顶栏
+│   ├── RoleEditor.tsx               # 角色编辑器
+│   ├── RoleList.tsx                 # 角色列表
+│   └── SelectionTTSButton.tsx       # 选中文本朗读按钮
 │
 ├── codepanel/          # 代码显示系统
-│   ├── CodePanelHost.tsx
-│   ├── CodePanelProvider.tsx
-│   └── events.ts
+│   ├── CodePanelHost.tsx            # 事件监听宿主
+│   ├── CodePanelProvider.tsx        # 状态提供器
+│   └── events.ts                    # 事件类型定义
 │
 ├── hooks/              # 自定义 React Hooks
-│   ├── useIsMobile.ts
-│   ├── useLive2D.ts
-│   ├── useResizableSidebar.ts
-│   ├── useRoles.ts
-│   ├── useTextSelectionTTS.ts
-│   ├── useTheme.ts
-│   └── useTTS.ts
+│   ├── useChatStream.ts  # ⭐ 核心：聊天流逻辑（含长文本附件处理）
+│   ├── useIsMobile.ts    # 移动端检测
+│   ├── useLive2D.ts      # Live2D 集成
+│   ├── useResizableSidebar.ts  # 可调整侧边栏
+│   ├── useRoles.ts       # 角色管理
+│   ├── useTextSelectionTTS.ts  # 选中文本朗读
+│   ├── useTheme.ts       # 主题切换
+│   └── useTTS.ts         # 语音合成
 │
 ├── services/           # API 服务
-│   └── api.ts
+│   └── api.ts          # 后端 API 封装（含附件上传）
 │
 ├── types/              # TypeScript 类型定义
-│   └── index.ts
+│   └── index.ts        # Role, Message, MessageAttachment 等类型
 │
 ├── utils/              # 工具函数
-│   ├── artifactBridge.ts
-│   ├── codeSegmentation.ts
-│   └── live2dBridge.ts
+│   ├── artifactBridge.ts     # 代码构件事件桥
+│   ├── codeSegmentation.ts   # 代码块解析
+│   └── live2dBridge.ts       # Live2D 消息桥
 │
 ├── App.tsx             # 主应用组件
 ├── main.tsx            # 应用入口
@@ -76,19 +80,17 @@ apps/web/src/
 - 代码面板集成
 
 #### `components/ChatWindow.tsx` ⭐
-主聊天界面组件：
-- **消息显示**：渲染对话历史
-- **输入处理**：文本输入，支持自动高度调整
-- **图片上传**：多图上传及预览
-- **流式传输**：从后端实时接收流式消息
-- **TTS 集成**：自动朗读收到的消息
-- **键盘快捷键**：Enter 发送，Shift+Enter 换行
-- **功能特性**：
-  - 自动滚动到最新消息
-  - 消息历史加载
-  - 加载指示器
-  - 图片预览和删除
-  - 可通过 props 自定义样式
+主聊天界面组件，使用 `useChatStream` hook 管理核心逻辑：
+- **布局管理**：头部、消息区、输入区三段式布局
+- **消息渲染**：使用 MessageBubble 组件渲染对话
+- **输入处理**：
+  - 文本输入（自动高度调整）
+  - 图片上传（通过 useChatStream）
+  - 代码块预览（通过 ComposerPreview）
+- **TTS 控制**：自动朗读开关、停止按钮
+- **流式控制**：停止生成按钮
+- **暴露 API**：通过 ref 暴露 `toggleAutoSpeak`、`stopSpeak`、`clearHistory`
+- **样式定制**：通过 props 自定义各区域样式
 
 #### `components/MessageBubble.tsx`
 单条消息渲染器：
@@ -113,6 +115,14 @@ apps/web/src/
 - 头像上传及预览
 - 验证和错误处理
 - 异步保存及加载状态
+
+#### `components/ComposerPreview.tsx`
+输入框预览区组件（图片 + 代码卡片）：
+- 显示待发送的图片预览
+- 显示输入文本中解析出的代码块
+- 代码块折叠/展开功能
+- 图片删除按钮
+- 复用于 ChatWindow 输入区
 
 #### `components/FloatingCodeButton.tsx`
 可拖拽的代码面板浮动按钮：
@@ -158,6 +168,38 @@ apps/web/src/
 代码显示系统的事件类型定义
 
 ### Hooks
+
+#### `hooks/useChatStream.ts` ⭐ 核心 Hook
+聊天流核心逻辑 Hook，ChatWindow 组件的核心依赖：
+- **状态管理**：
+  - `messages`：消息历史
+  - `input`：输入框内容
+  - `isLoading`：加载状态
+  - `autoSpeak`：自动朗读开关
+  - `uploadedImages`：已上传图片列表
+  - `textAttachments`：文本附件列表（长文本粘贴自动生成）
+  - `inputCodeCards`：输入框中解析的代码卡片
+  - `collapsedMap`：代码卡片折叠状态
+  - `expandedMap`：历史消息展开状态
+- **核心功能**：
+  - `send()`：发送消息（含图片和附件支持）
+  - `cancelStream()`：取消流式响应
+  - `clearHistory()`：清空对话历史
+- **TTS 集成**：
+  - 自动朗读开关
+  - 流式文本智能分段
+- **图片上传**：
+  - `handleImageUpload()`：处理图片上传
+  - `removeImage()`：删除图片
+  - `openFileDialog()`：打开文件选择器
+- **长文本附件**：
+  - `handlePastedText()`：处理长文本粘贴（>2000字符或>50行自动转附件）
+  - `removeTextAttachment()`：删除文本附件
+  - `shouldConvertToAttachment()`：判断是否应转为附件
+- **优化特性**：
+  - O(1) 流式消息更新
+  - 请求 ID 机制防止过期响应
+  - 代码块自动解析
 
 #### `hooks/useTTS.ts`
 高级 TTS（文本转语音）Hook：

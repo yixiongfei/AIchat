@@ -4,14 +4,26 @@ import { agentService } from "../letta/agent.service";
 
 const router = Router();
 
+/** 附件信息接口（前端直接发送内容） */
+interface AttachmentInfo {
+  fileName: string;
+  content: string;
+  charCount: number;
+  lineCount: number;
+}
+
 /**
  * 发送消息（流式）
  * POST /api/messages/:roleId
- * Body: { message: string, images?: string[] }
+ * Body: { message: string, images?: string[], attachments?: AttachmentInfo[] }
  */
 router.post("/:roleId", async (req, res) => {
   const { roleId } = req.params;
-  const { message, images } = req.body; // ✅ 添加 images 支持
+  const { message, images, attachments } = req.body as {
+    message: string;
+    images?: string[];
+    attachments?: AttachmentInfo[];
+  };
 
   try {
     // 从数据库获取角色信息以获取 agentId
@@ -20,7 +32,20 @@ router.post("/:roleId", async (req, res) => {
       return res.status(404).json({ error: "Role or Agent not found" });
     }
 
-    await messageService.sendMessageStream(roleId, role.agentId, message, res, images);
+    // 构建完整消息：如果有附件，将内容拼接进消息
+    let fullMessage = message;
+    
+    if (attachments && attachments.length > 0) {
+      const attachmentContents = attachments.map((att) =>
+        `\n\n--- 附件: ${att.fileName} (${att.lineCount} 行, ${att.charCount} 字符) ---\n${att.content}\n--- 附件结束 ---`
+      );
+      
+      fullMessage = fullMessage 
+        ? `${fullMessage}\n${attachmentContents.join('\n')}`
+        : attachmentContents.join('\n');
+    }
+
+    await messageService.sendMessageStream(roleId, role.agentId, fullMessage, res, images);
   } catch (error) {
     console.error("Route error:", error);
     if (!res.headersSent) {

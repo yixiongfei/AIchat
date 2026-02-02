@@ -17,6 +17,15 @@ export interface UploadedImage {
   base64: string;  // dataURL
 }
 
+/** 文本附件模型（长文本粘贴自动生成，发送时才传给后端） */
+export interface TextAttachment {
+  id: string;
+  fileName: string;
+  content: string;      // 原始文本内容
+  charCount: number;    // 字符数
+  lineCount: number;    // 行数
+}
+
 /** 输入框代码卡片（解析自 input） */
 export interface CodeCard {
   id: string;
@@ -28,6 +37,27 @@ const cn = (...classes: Array<string | false | null | undefined>) =>
   classes.filter(Boolean).join(" ");
 
 const CODE_BLOCK_RE = /```(\w*)\n([\s\S]*?)```/g;
+
+/** 长文本粘贴阈值 */
+export const PASTE_TEXT_THRESHOLD = {
+  CHAR_COUNT: 2000,   // 超过 2000 字符转附件
+  LINE_COUNT: 50,     // 或超过 50 行转附件
+};
+
+/** 生成时间戳文件名 */
+function generateTextFileName(): string {
+  const now = new Date();
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `paste-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.txt`;
+}
+
+/** 判断文本是否应转为附件 */
+export function shouldConvertToAttachment(text: string): boolean {
+  if (!text) return false;
+  const charCount = text.length;
+  const lineCount = text.split(/\r?\n/).length;
+  return charCount >= PASTE_TEXT_THRESHOLD.CHAR_COUNT || lineCount >= PASTE_TEXT_THRESHOLD.LINE_COUNT;
+}
 
 function parseCodeBlocks(text: string): { cards: CodeCard[]; plainText: string } {
   const cards: CodeCard[] = [];
@@ -72,6 +102,7 @@ export function useChatStream({
   const [isLoading, setIsLoading] = useState(false);
 
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
+  const [textAttachments, setTextAttachments] = useState<TextAttachment[]>([]);
   const [autoSpeak, setAutoSpeak] = useState(defaultAutoSpeak);
 
   // MessageBubble 代码展开（历史消息）
@@ -218,6 +249,38 @@ export function useChatStream({
     });
   }, []);
 
+  /** 处理长文本粘贴 -> 前端存储为附件（发送时才传给后端） */
+  const handlePastedText = useCallback((text: string) => {
+    if (!shouldConvertToAttachment(text)) return false;
+
+    const id = globalThis.crypto?.randomUUID?.() ?? `txt-${Date.now()}-${Math.random()}`;
+    const fileName = generateTextFileName();
+    const lineCount = text.split(/\r?\n/).length;
+
+    const attachment: TextAttachment = {
+      id,
+      fileName,
+      content: text,
+      charCount: text.length,
+      lineCount,
+    };
+
+    setTextAttachments((prev) => [...prev, attachment]);
+    showWaifuMessage(`已添加文本附件 (${lineCount} 行, ${text.length} 字符)`, 2000, 10, true);
+
+    return true; // 表示已处理
+  }, []);
+
+  /** 删除文本附件 */
+  const removeTextAttachment = useCallback((id: string) => {
+    setTextAttachments((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
+  /** 清空文本附件（用于发送后） */
+  const clearTextAttachments = useCallback(() => {
+    setTextAttachments([]);
+  }, []);
+
   /** O(1) 更新最后一条 assistant 消息（避免每 chunk filter 全量数组） */
   const upsertAssistantMessage = useCallback((id: string, content: string) => {
     setMessages((prev) => {
@@ -260,27 +323,49 @@ export function useChatStream({
     }
   }, [role?.id]);
 
-  /** 发送消息（含图片 base64） */
+  /** 发送消息（含图片 base64 和文本附件） */
   const send = useCallback(async () => {
-    if ((!input.trim() && uploadedImages.length === 0) || isLoading) return;
+    const hasTextAttachments = textAttachments.length > 0;
+    if ((!input.trim() && uploadedImages.length === 0 && !hasTextAttachments) || isLoading) return;
 
     const contentToSend = input.trim();
     const imagesToSend = [...uploadedImages];
     const base64Images = imagesToSend.map((img) => img.base64).filter(Boolean);
 
+    // 收集文本附件（内容直接发送，不需要预上传）
+    const attachmentInfos = textAttachments.map((a) => ({
+      fileName: a.fileName,
+      content: a.content,   // 直接带上内容
+      charCount: a.charCount,
+      lineCount: a.lineCount,
+    }));
+
+    // 构建显示的消息内容（如果有附件，添加占位符）
+    let displayContent = contentToSend;
+    if (attachmentInfos.length > 0) {
+      const attachmentNotes = attachmentInfos
+        .map((a) => `[附件: ${a.fileName} (${a.lineCount} 行, ${a.charCount} 字符)]`)
+        .join('\n');
+      displayContent = displayContent
+        ? `${displayContent}\n\n${attachmentNotes}`
+        : attachmentNotes;
+    }
+
     // 用户消息：图片用 base64（dataURL）便于持久/展示
     const userMsg: Message = {
       id: "user-" + Date.now(),
       role: "user",
-      content: contentToSend,
+      content: displayContent,
       timestamp: Date.now(),
       images: base64Images,
+      attachments: attachmentInfos.length > 0 ? attachmentInfos : undefined,
     };
 
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setIsLoading(true);
     clearImages(); // 发送后立即清掉预览（并释放 objectURL）
+    clearTextAttachments(); // 清空文本附件
 
     showWaifuMessage("让我想想…", 2000, 9, true);
 
@@ -330,7 +415,8 @@ export function useChatStream({
 
           if (autoSpeak) await flushStream();
         },
-        base64Images
+        base64Images,
+        attachmentInfos.length > 0 ? attachmentInfos : undefined
       );
     } catch (e) {
       console.error("Chat error:", e);
@@ -343,6 +429,7 @@ export function useChatStream({
   }, [
     input,
     uploadedImages,
+    textAttachments,
     isLoading,
     role.id,
     autoSpeak,
@@ -350,6 +437,7 @@ export function useChatStream({
     flushStream,
     upsertAssistantMessage,
     clearImages,
+    clearTextAttachments,
   ]);
 
   return {
@@ -361,6 +449,7 @@ export function useChatStream({
     isLoading,
     autoSpeak,
     uploadedImages,
+    textAttachments,
 
     // code preview
     inputCodeCards,
@@ -383,6 +472,10 @@ export function useChatStream({
     openFileDialog,
     handleImageUpload,
     removeImage,
+
+    // text attachments
+    handlePastedText,
+    removeTextAttachment,
 
     // helpers
     cn,

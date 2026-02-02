@@ -1,6 +1,6 @@
 import React from "react";
-import { X, Code, ChevronDown, ChevronUp } from "lucide-react";
-import type { UploadedImage, CodeCard } from "../hooks/useChatStream";
+import { X, Code, ChevronDown, ChevronUp, FileText } from "lucide-react";
+import type { UploadedImage, CodeCard, TextAttachment } from "../hooks/useChatStream";
 
 interface ComposerPreviewProps {
   uploadedImages: UploadedImage[];
@@ -9,6 +9,9 @@ interface ComposerPreviewProps {
   codeCards: CodeCard[];
   collapsedMap: Record<string, boolean>;
   onToggleCodeCard: (id: string) => void;
+
+  textAttachments?: TextAttachment[];
+  onRemoveTextAttachment?: (id: string) => void;
 }
 
 export default function ComposerPreview({
@@ -17,9 +20,61 @@ export default function ComposerPreview({
   codeCards,
   collapsedMap,
   onToggleCodeCard,
+  textAttachments = [],
+  onRemoveTextAttachment,
 }: ComposerPreviewProps) {
   return (
     <>
+      {/* ✅ 文本附件预览区 - 卡片带内容预览 */}
+      {textAttachments.length > 0 && (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {textAttachments.map((attachment) => {
+            // 截取前几行预览
+            const previewLines = attachment.content.split(/\r?\n/).slice(0, 4);
+            const preview = previewLines.join('\n');
+            const hasMore = attachment.lineCount > 4;
+
+            return (
+              <div
+                key={attachment.id}
+                className="group relative w-[125px] rounded-lg border border-slate-600/60 bg-slate-800/60 hover:bg-slate-700/60 transition-colors overflow-hidden"
+              >
+                {/* 头部：文件名 + 删除 */}
+                <div className="flex items-center justify-between px-2 py-1.5 bg-slate-700/30">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <FileText size={12} className="text-blue-400 shrink-0" />
+                    <span className="text-slate-200 text-xs font-medium truncate">
+                      {attachment.fileName}
+                    </span>
+                    <span className="text-slate-500 text-[10px] shrink-0">
+                      {attachment.lineCount}行
+                    </span>
+                  </div>
+                  {onRemoveTextAttachment && (
+                    <button
+                      type="button"
+                      onClick={() => onRemoveTextAttachment(attachment.id)}
+                      className="p-0.5 rounded hover:bg-slate-500/50 text-slate-400 hover:text-red-400 transition shrink-0"
+                      title="删除附件"
+                      aria-label="删除附件"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+                {/* 内容预览 */}
+                <div className="px-2 py-1.5 text-[10px] text-slate-400 font-mono whitespace-pre-wrap break-all max-h-20 overflow-hidden leading-tight">
+                  {preview}
+                  {hasMore && (
+                    <span className="text-slate-500 italic">...</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* ✅ 代码卡片预览区 */}
       {codeCards.length > 0 && (
         <div className="mb-3 space-y-2">

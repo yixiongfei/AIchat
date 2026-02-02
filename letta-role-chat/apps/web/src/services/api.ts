@@ -1,5 +1,13 @@
 const API_BASE_URL = "/api";
 
+/** 文本附件信息（发送时携带完整内容） */
+export interface AttachmentInfo {
+  fileName: string;
+  content: string;       // 文本内容
+  charCount: number;
+  lineCount: number;
+}
+
 export const api = {
   async getRoles() {
     const res = await fetch(`${API_BASE_URL}/roles`);
@@ -65,18 +73,19 @@ export const api = {
     await fetch(`${API_BASE_URL}/tts/audio/${fileName}`, { method: 'DELETE' });
   },
 
-  // ✅ 流式消息发送（支持图片）
+  // ✅ 流式消息发送（支持图片和文本附件）
   async sendMessageStream(
     roleId: string,
     message: string,
     onChunk: (chunk: string) => void,
     onDone: () => void,
-    images?: string[]  // ✅ 新增 images 参数
+    images?: string[],
+    attachments?: AttachmentInfo[]
   ) {
     const response = await fetch(`${API_BASE_URL}/messages/${roleId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, images }),  // ✅ 传入 images
+      body: JSON.stringify({ message, images, attachments }),
     });
 
     if (!response.body) {

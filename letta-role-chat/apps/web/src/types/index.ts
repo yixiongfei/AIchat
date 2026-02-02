@@ -12,12 +12,20 @@ export interface Role {
   createdAt: number;
 }
 
+/** 消息附件信息（用于显示，不含内容） */
+export interface MessageAttachment {
+  fileName: string;
+  charCount: number;
+  lineCount: number;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
-  images?: string[]; // ✅ 添加图片支持
+  images?: string[];                  // 图片支持（base64）
+  attachments?: MessageAttachment[];  // 文本附件支持
 }
 
 export interface Conversation {

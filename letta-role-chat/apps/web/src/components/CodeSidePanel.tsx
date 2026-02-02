@@ -88,11 +88,11 @@ export function CodeSidePanel({
         ].join(" ")}
         style={{ width }}
         role="dialog"
-        aria-modal="true"
+        aria-modal={open}
         aria-label={title}
-        aria-hidden={open ? "false" : "true"}
-
+        aria-hidden={!open}
       >
+      
         {/* 拖拽条 */}
         <div
           className="absolute left-0 top-0 h-full w-1 cursor-col-resize hover:bg-blue-500/30"
