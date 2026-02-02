@@ -7,10 +7,11 @@ const router = Router();
 /**
  * 发送消息（流式）
  * POST /api/messages/:roleId
+ * Body: { message: string, images?: string[] }
  */
 router.post("/:roleId", async (req, res) => {
   const { roleId } = req.params;
-  const { message } = req.body;
+  const { message, images } = req.body; // ✅ 添加 images 支持
 
   try {
     // 从数据库获取角色信息以获取 agentId
@@ -19,7 +20,7 @@ router.post("/:roleId", async (req, res) => {
       return res.status(404).json({ error: "Role or Agent not found" });
     }
 
-    await messageService.sendMessageStream(roleId, role.agentId, message, res);
+    await messageService.sendMessageStream(roleId, role.agentId, message, res, images);
   } catch (error) {
     console.error("Route error:", error);
     if (!res.headersSent) {
@@ -28,19 +29,19 @@ router.post("/:roleId", async (req, res) => {
   }
 });
 
-  // 删除指定角色的所有消息
-  router.delete('/:roleId', async (req, res) => {
-    const { roleId } = req.params;
-    try {
-      const role = await agentService.getRole(roleId);
-      if (!role) return res.status(404).json({ error: 'Role not found' });
+// 删除指定角色的所有消息
+router.delete('/:roleId', async (req, res) => {
+  const { roleId } = req.params;
+  try {
+    const role = await agentService.getRole(roleId);
+    if (!role) return res.status(404).json({ error: 'Role not found' });
 
-      const result = await messageService.deleteHistory(roleId);
-      res.json(result);
-    } catch (error) {
-      console.error('Delete history error:', error);
-      res.status(500).json({ error: 'Failed to delete history' });
-    }
-  });
+    const result = await messageService.deleteHistory(roleId);
+    res.json(result);
+  } catch (error) {
+    console.error('Delete history error:', error);
+    res.status(500).json({ error: 'Failed to delete history' });
+  }
+});
 
 export default router;

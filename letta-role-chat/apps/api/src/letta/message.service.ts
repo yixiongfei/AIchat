@@ -11,21 +11,54 @@ function normalizeBaseUrl(url: string) {
 function wrapUserInput(input: string) {
   const start = "<<<USER_INPUT_START>>>";
   const end = "<<<USER_INPUT_END>>>";
-  return `${start}\n${input}\n${end}`;
+  return `${start}
+${input}
+${end}`;
+}
+
+// ✅ 构建多模态消息内容（支持文本 + 图片）
+function buildMessageContent(text: string, images?: string[]) {
+  // 如果没有图片，返回包装后的纯文本
+  if (!images || images.length === 0) {
+    return wrapUserInput(text);
+  }
+
+  // 有图片时，构建多模态内容数组
+  const content: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+
+  // 添加文本部分
+  if (text) {
+    content.push({
+      type: "text",
+      text: wrapUserInput(text)
+    });
+  }
+
+  // 添加图片部分
+  for (const img of images) {
+    // 支持 base64 格式或 URL 格式
+    content.push({
+      type: "image_url",
+      image_url: { url: img }
+    });
+  }
+
+  return content;
 }
 
 export const messageService = {
-  async sendMessageStream(roleId: string, agentId: string, text: string, res: Response) {
+  async sendMessageStream(roleId: string, agentId: string, text: string, res: Response, images?: string[]) {
     // SSE headers
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
 
-    // 1. 保存用户消息到数据库
+    // 1. 保存用户消息到数据库（包含图片信息）
     const userMsgId = uuidv4();
+    const imagesJson = images && images.length > 0 ? JSON.stringify(images) : null;
     await pool.query(
-      'INSERT INTO messages (id, agent_id, role, content, timestamp) VALUES (?, ?, ?, ?, ?)',
-      [userMsgId, roleId, 'user', text, Date.now()]
+      'INSERT INTO messages (id, agent_id, role, content, timestamp, images) VALUES (?, ?, ?, ?, ?, ?)',
+      [userMsgId, roleId, 'user', text, Date.now(), imagesJson]
     );
 
     try {
@@ -34,8 +67,8 @@ export const messageService = {
 
       const url = `${baseUrl}/v1/agents/${agentId}/messages/stream`;
 
-      // 给 Letta 的请求使用包装后的用户输入（数据库仍保存原始文本）
-      const wrapped = wrapUserInput(text);
+      // ✅ 构建多模态消息内容
+      const messageContent = buildMessageContent(text, images);
 
       const upstream = await fetch(url, {
         method: "POST",
@@ -44,14 +77,16 @@ export const messageService = {
           ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
         },
         body: JSON.stringify({
-          messages: [{ role: "user", content: wrapped }],
+          messages: [{ role: "user", content: messageContent }],
           stream_tokens: true,
         }),
       });
 
       if (!upstream.ok || !upstream.body) {
         const errText = await upstream.text().catch(() => "");
-        res.write(`data: ${JSON.stringify({ error: "Upstream error", detail: errText })}\n\n`);
+        res.write(`data: ${JSON.stringify({ error: "Upstream error", detail: errText })}
+
+`);
         return res.end();
       }
 
@@ -67,12 +102,11 @@ export const messageService = {
         res.write(chunk);
 
         // 尝试解析内容以保存到数据库
-        const lines = chunk.split('\n');
+        const lines = chunk.split('');
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              // 根据 Letta SSE 格式提取内容，这里假设是 token 级流式
               if (data.choices?.[0]?.delta?.content) {
                 assistantContent += data.choices[0].delta.content;
               } else if (data.content) {
@@ -97,7 +131,9 @@ export const messageService = {
       res.end();
     } catch (error: any) {
       console.error("Streaming error:", error);
-      res.write(`data: ${JSON.stringify({ error: "Failed to fetch stream" })}\n\n`);
+      res.write(`data: ${JSON.stringify({ error: "Failed to fetch stream" })}
+
+`);
       res.end();
     }
   },
@@ -111,14 +147,14 @@ export const messageService = {
       id: row.id,
       role: row.role,
       content: row.content,
-      timestamp: row.timestamp
+      timestamp: row.timestamp,
+      images: row.images ? JSON.parse(row.images) : undefined // ✅ 返回图片数组
     }));
-  }
-  ,
+  },
+
   async deleteHistory(agentId: string) {
     try {
       const [result]: any = await pool.query('DELETE FROM messages WHERE agent_id = ?', [agentId]);
-      // result.affectedRows or result.affected may vary by driver
       const deleted = result?.affectedRows ?? result?.affected ?? 0;
       console.log(`[Message] Deleted ${deleted} messages for agent ${agentId}`);
       return { success: true, deleted };
