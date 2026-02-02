@@ -4,7 +4,6 @@ export const api = {
   async getRoles() {
     const res = await fetch(`${API_BASE_URL}/roles`);
     const data = await res.json();
-    // 将 avatar 文件名转换为完整 URL
     return data.map((r: any) => ({
       ...r,
       avatar: r.avatar ? `${API_BASE_URL}/avatars/${r.avatar}` : undefined
@@ -48,9 +47,7 @@ export const api = {
   },
 
   async syncRoles() {
-    const res = await fetch(`${API_BASE_URL}/roles/sync`, {
-      method: 'POST',
-    });
+    const res = await fetch(`${API_BASE_URL}/roles/sync`, { method: 'POST' });
     return res.json();
   },
 
@@ -60,93 +57,67 @@ export const api = {
   },
 
   async deleteHistory(roleId: string) {
-    const res = await fetch(`${API_BASE_URL}/messages/${roleId}`, {
-      method: 'DELETE',
-    });
+    const res = await fetch(`${API_BASE_URL}/messages/${roleId}`, { method: 'DELETE' });
     return res.json();
   },
 
-  // 删除音频文件
   async deleteAudio(fileName: string) {
-    await fetch(`${API_BASE_URL}/tts/audio/${fileName}`, {
-      method: 'DELETE',
-    });
+    await fetch(`${API_BASE_URL}/tts/audio/${fileName}`, { method: 'DELETE' });
   },
 
-  // 流式消息发送
-  async sendMessageStream(roleId: string, message: string, onChunk: (chunk: string) => void, onDone: () => void) {
+  // ✅ 流式消息发送（支持图片）
+  async sendMessageStream(
+    roleId: string,
+    message: string,
+    onChunk: (chunk: string) => void,
+    onDone: () => void,
+    images?: string[]  // ✅ 新增 images 参数
+  ) {
     const response = await fetch(`${API_BASE_URL}/messages/${roleId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, images }),  // ✅ 传入 images
     });
 
-    if (!response.body) return;
+    if (!response.body) {
+      onDone();
+      return;
+    }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-
-    // Use a persistent buffer to handle cases where a single 'data: {...}' line
-    // is split across multiple stream chunks. We append each decoded chunk
-    // to the buffer, split by newline, process full lines, and keep the last
-    // partial line for the next read.
     let buffer = '';
+
+    const processLine = (line: string) => {
+      if (!line.startsWith('data: ')) return false;
+      const dataStr = line.slice(6).trim();
+      if (dataStr === '[DONE]') return true;
+      try {
+        const data = JSON.parse(dataStr);
+        const content = data.choices?.[0]?.delta?.content ?? data.content;
+        if (content) onChunk(content);
+      } catch {
+        // 忽略非 JSON 行
+      }
+      return false;
+    };
+
     while (true) {
       const { value, done } = await reader.read();
       if (done) {
-        // process any remaining buffered data
-        if (buffer) {
-          const lines = buffer.split('\n');
-          for (const line of lines) {
-            if (!line) continue;
-            if (line.startsWith('data: ')) {
-              const dataStr = line.slice(6).trim();
-              if (dataStr === '[DONE]') {
-                onDone();
-                return;
-              }
-              try {
-                const data = JSON.parse(dataStr);
-                if (data.choices?.[0]?.delta?.content) {
-                  onChunk(data.choices[0].delta.content);
-                } else if (data.content) {
-                  onChunk(data.content);
-                }
-              } catch (e) {
-                // ignore non-JSON lines
-              }
-            }
-          }
+        // 处理残留 buffer
+        for (const line of buffer.split('\n')) {
+          if (line && processLine(line)) return onDone();
         }
-        onDone();
-        break;
+        return onDone();
       }
 
-      const chunk = decoder.decode(value, { stream: true });
-      buffer += chunk;
-
+      buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
-      // keep last line (may be partial)
       buffer = lines.pop() || '';
 
       for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const dataStr = line.slice(6).trim();
-          if (dataStr === '[DONE]') {
-            onDone();
-            return;
-          }
-          try {
-            const data = JSON.parse(dataStr);
-            if (data.choices?.[0]?.delta?.content) {
-              onChunk(data.choices[0].delta.content);
-            } else if (data.content) {
-              onChunk(data.content);
-            }
-          } catch (e) {
-            // 忽略非 JSON 行
-          }
-        }
+        if (processLine(line)) return onDone();
       }
     }
   }
