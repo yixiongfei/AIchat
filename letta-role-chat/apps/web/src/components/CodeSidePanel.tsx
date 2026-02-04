@@ -150,7 +150,7 @@ export function CodeSidePanel({
               {code}
             </SyntaxHighlighter>
           ) : (
-            <div className="p-4 text-slate-400">まだコードがありません。</div>
+            <div className="p-4 text-slate-400"></div>
           )}
         </div>
       </aside>
