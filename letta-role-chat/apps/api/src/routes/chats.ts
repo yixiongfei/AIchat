@@ -140,6 +140,8 @@ router.post("/:agentId", async (req, res) => {
  * 更新聊天标题
  * PUT /api/chats/:chatId
  * Body: { title: string }
+ * 
+ * 同时更新本地数据库和 Letta 云端的 conversation summary
  */
 router.put("/:chatId", async (req, res) => {
   const { chatId } = req.params;
@@ -150,6 +152,33 @@ router.put("/:chatId", async (req, res) => {
       return res.status(400).json({ error: "Title is required" });
     }
 
+    // 先获取 letta_conversation_id
+    const [chats] = await pool.query(
+      `SELECT letta_conversation_id FROM chats WHERE id = ?`,
+      [chatId]
+    );
+    
+    const chatRows = chats as any[];
+    if (chatRows.length === 0) {
+      return res.status(404).json({ error: "Chat not found" });
+    }
+
+    const lettaConversationId = chatRows[0].letta_conversation_id;
+
+    // 如果有 Letta conversation，同步更新云端的 summary
+    if (lettaConversationId) {
+      try {
+        await lettaClient.conversations.update(lettaConversationId, {
+          summary: title
+        });
+        console.log(`Updated Letta conversation summary: ${lettaConversationId} -> ${title}`);
+      } catch (lettaError) {
+        // 即使 Letta API 失败，仍然继续更新本地记录
+        console.error("Failed to update Letta conversation summary:", lettaError);
+      }
+    }
+
+    // 更新本地数据库
     const [result] = await pool.query(
       `UPDATE chats SET title = ?, updated_at = ? WHERE id = ?`,
       [title, Date.now(), chatId]
@@ -169,12 +198,38 @@ router.put("/:chatId", async (req, res) => {
 /**
  * 删除聊天
  * DELETE /api/chats/:chatId
+ * 
+ * 同时删除本地数据库记录和 Letta 云端的 conversation
  */
 router.delete("/:chatId", async (req, res) => {
   const { chatId } = req.params;
 
   try {
-    // 先删除聊天中的所有消息（外键约束会自动处理，但明确删除更清晰）
+    // 先获取 letta_conversation_id
+    const [chats] = await pool.query(
+      `SELECT letta_conversation_id FROM chats WHERE id = ?`,
+      [chatId]
+    );
+    
+    const chatRows = chats as any[];
+    if (chatRows.length === 0) {
+      return res.status(404).json({ error: "Chat not found" });
+    }
+
+    const lettaConversationId = chatRows[0].letta_conversation_id;
+
+    // 如果有 Letta conversation，先删除云端的
+    if (lettaConversationId) {
+      try {
+        await lettaClient.conversations.cancel(lettaConversationId);
+        console.log(`Cancelled Letta conversation: ${lettaConversationId}`);
+      } catch (lettaError) {
+        // 即使 Letta API 失败，仍然继续删除本地记录
+        console.error("Failed to delete Letta conversation:", lettaError);
+      }
+    }
+
+    // 删除聊天中的所有消息
     await pool.query(`DELETE FROM messages WHERE chat_id = ?`, [chatId]);
     
     // 删除聊天

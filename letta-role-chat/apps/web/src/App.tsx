@@ -68,11 +68,12 @@ function AppInner() {
   };
 
   // ✅ 新建 Chat
+  // 逻辑：创建新的空对话并切换到它
   const handleNewChat = useCallback(async () => {
     if (!selectedRole) return;
     try {
-      const chat = await api.createChat(selectedRole.id);
-      setSelectedChat(chat);
+      const newChat = await api.createChat(selectedRole.id);
+      setSelectedChat(newChat);
       setChatListKey((k) => k + 1); // 刷新列表
     } catch (error) {
       console.error("Failed to create chat:", error);

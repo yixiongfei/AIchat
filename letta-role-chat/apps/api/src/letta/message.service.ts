@@ -508,6 +508,29 @@ export const messageService = {
 
   async deleteHistory(agentId: string) {
     try {
+      // 1. 先从数据库获取对应的 Letta agent_id
+      const [agents] = await pool.query(
+        'SELECT agent_id FROM agents WHERE id = ?',
+        [agentId]
+      );
+      
+      const agentRows = agents as any[];
+      const lettaAgentId = agentRows[0]?.agent_id;
+
+      // 2. 如果有 Letta agent_id，调用 API 重置 agent 的消息记忆
+      if (lettaAgentId) {
+        try {
+          await lettaClient.agents.messages.reset(lettaAgentId, {
+            add_default_initial_messages: true
+          });
+          console.log(`[Message] Reset Letta agent messages for ${lettaAgentId}`);
+        } catch (lettaError) {
+          // 即使 Letta API 失败，仍然继续删除本地记录
+          console.error("Failed to reset Letta agent messages:", lettaError);
+        }
+      }
+
+      // 3. 删除本地数据库中的消息
       const [result]: any = await pool.query('DELETE FROM messages WHERE agent_id = ?', [agentId]);
       const deleted = result?.affectedRows ?? result?.affected ?? 0;
       console.log(`[Message] Deleted ${deleted} messages for agent ${agentId}`);
