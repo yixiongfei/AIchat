@@ -2,11 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Role, Message } from "../types";
 import { api } from "../services/api";
 import useTTS from "../hooks/useTTS";
-import {
-  showWaifuMessage,
-  showWaifuStreamUpdate,
-  clearWaifuTimers,
-} from "../utils/live2dBridge";
 import { previewText, stripAllFencedCodes } from "../utils/codeSegmentation";
 
 /** 上传图片模型 */
@@ -117,6 +112,10 @@ export function useChatStream({
   // 滚动/容器引用交给 ChatWindow 管
   // 这里提供取消能力：用 requestId 让旧请求 chunk 自动失效
   const activeRequestIdRef = useRef<string>("");
+  
+  // ✅ 跟踪当前显示的 roleId，用于消息隔离
+  // 当切换 agent 时，旧 agent 的流式响应不会写入新 agent 的界面
+  const currentRoleIdRef = useRef<string>(role.id);
 
   const { appendStream, flushStream, stop: stopSpeak } = useTTS({
     voice: role?.voice,
@@ -166,6 +165,10 @@ export function useChatStream({
   // 加载历史
   useEffect(() => {
     let mounted = true;
+    
+    // ✅ 更新当前 roleId ref（用于消息隔离）
+    currentRoleIdRef.current = role.id;
+    
     const loadHistory = async () => {
       try {
         const history = await api.getHistory(role.id);
@@ -184,7 +187,6 @@ export function useChatStream({
   // 卸载清理
   useEffect(() => {
     return () => {
-      clearWaifuTimers();
       stopSpeak();
       // 清理 objectURL
       uploadedImages.forEach((img) => URL.revokeObjectURL(img.preview));
@@ -205,11 +207,11 @@ export function useChatStream({
 
       const valid = Array.from(files).filter((file) => {
         if (!file.type.startsWith("image/")) {
-          showWaifuMessage("请上传图片文件", 3000, 20, true);
+          console.warn("请上传图片文件");
           return false;
         }
         if (file.size > 10 * 1024 * 1024) {
-          showWaifuMessage("图片大小不能超过 10MB", 3000, 20, true);
+          console.warn("图片大小不能超过 10MB");
           return false;
         }
         return true;
@@ -249,6 +251,45 @@ export function useChatStream({
     });
   }, []);
 
+  /** 处理粘贴的图片（剪贴板/截图） */
+  const handlePastedImages = useCallback(
+    async (files: File[]) => {
+      // 过滤和验证文件
+      const valid = files.filter((file) => {
+        if (!file.type.startsWith("image/")) {
+          console.warn("只能粘贴图片文件");
+          return false;
+        }
+        if (file.size > 10 * 1024 * 1024) {
+          console.warn("图片大小不能超过 10MB");
+          return false;
+        }
+        return true;
+      });
+
+      if (valid.length === 0) return;
+
+      // 转换为 UploadedImage 格式
+      const newImages: UploadedImage[] = await Promise.all(
+        valid.map(async (file) => {
+          const id =
+            (globalThis.crypto?.randomUUID?.() ??
+              `img-${Date.now()}-${Math.random()}`) as string;
+          const preview = URL.createObjectURL(file);
+          const base64 = await fileToBase64(file);
+          return { id, file, preview, base64 };
+        })
+      );
+
+      setUploadedImages((prev) => [...prev, ...newImages]);
+      
+      // 提示用户
+      const msg = valid.length === 1 ? "已添加图片" : `已添加 ${valid.length} 张图片`;
+      console.log(msg);
+    },
+    []
+  );
+
   /** 处理长文本粘贴 -> 前端存储为附件（发送时才传给后端） */
   const handlePastedText = useCallback((text: string) => {
     if (!shouldConvertToAttachment(text)) return false;
@@ -266,7 +307,7 @@ export function useChatStream({
     };
 
     setTextAttachments((prev) => [...prev, attachment]);
-    showWaifuMessage(`已添加文本附件 (${lineCount} 行, ${text.length} 字符)`, 2000, 10, true);
+    console.log(`已添加文本附件 (${lineCount} 行, ${text.length} 字符)`);
 
     return true; // 表示已处理
   }, []);
@@ -305,7 +346,7 @@ export function useChatStream({
     activeRequestIdRef.current = "";
     setIsLoading(false);
     stopSpeak();
-    showWaifuMessage("已停止生成", 2000, 20, true);
+    console.log("已停止生成");
   }, [stopSpeak]);
 
   /** 清空历史 */
@@ -316,10 +357,10 @@ export function useChatStream({
     try {
       await api.deleteHistory(role.id);
       setMessages([]);
-      showWaifuMessage("历史已清空", 3000, 20, true);
+      console.log("历史已清空");
     } catch (e) {
       console.error("Failed to delete history", e);
-      showWaifuMessage("清空失败", 3000, 20, true);
+      console.error("清空失败");
     }
   }, [role?.id]);
 
@@ -367,10 +408,13 @@ export function useChatStream({
     clearImages(); // 发送后立即清掉预览（并释放 objectURL）
     clearTextAttachments(); // 清空文本附件
 
-    showWaifuMessage("让我想想…", 2000, 9, true);
+    console.log("正在思考...");
 
     const requestId = "req-" + Date.now();
     activeRequestIdRef.current = requestId;
+    
+    // ✅ 记录发起请求时的 roleId，用于消息隔离
+    const requestRoleId = role.id;
 
     const assistantMsgId = "assistant-" + Date.now();
     let assistantContent = "";
@@ -382,16 +426,13 @@ export function useChatStream({
         (chunk: string) => {
           // 如果已取消或被新请求替换，忽略
           if (activeRequestIdRef.current !== requestId) return;
+          
+          // ✅ 消息隔离：如果已切换到其他 agent，不写入当前界面
+          // 响应仍在后台继续，切换回来时会从历史加载
+          if (currentRoleIdRef.current !== requestRoleId) return;
 
           assistantContent += chunk;
           upsertAssistantMessage(assistantMsgId, assistantContent);
-
-          showWaifuStreamUpdate(assistantContent, {
-            throttleMs: 120,
-            priority: 10,
-            timeout: 12000,
-            override: true,
-          });
 
           if (autoSpeak) {
             appendStream(chunk, {
@@ -406,12 +447,18 @@ export function useChatStream({
         },
         async () => {
           if (activeRequestIdRef.current !== requestId) return;
+          
+          // ✅ 消息隔离：如果已切换到其他 agent，不更新当前界面状态
+          if (currentRoleIdRef.current !== requestRoleId) {
+            console.log(`[Stream] 响应完成但已切换 agent (${requestRoleId} -> ${currentRoleIdRef.current})`);
+            return;
+          }
 
           setIsLoading(false);
           activeRequestIdRef.current = "";
 
           const brief = previewText(stripAllFencedCodes(assistantContent), 220);
-          if (assistantContent.trim()) showWaifuMessage(brief || "已完成", 6000, 10, true);
+          if (assistantContent.trim()) console.log("响应完成:", brief || "已完成");
 
           if (autoSpeak) await flushStream();
         },
@@ -424,7 +471,7 @@ export function useChatStream({
         setIsLoading(false);
         activeRequestIdRef.current = "";
       }
-      showWaifuMessage("好像出错了…要不要再试一次?", 5000, 20, true);
+      console.error("发送消息失败，请重试");
     }
   }, [
     input,
@@ -472,6 +519,9 @@ export function useChatStream({
     openFileDialog,
     handleImageUpload,
     removeImage,
+
+    // paste images
+    handlePastedImages,
 
     // text attachments
     handlePastedText,

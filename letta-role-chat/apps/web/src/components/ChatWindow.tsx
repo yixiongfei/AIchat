@@ -82,6 +82,7 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
       handleImageUpload,
       removeImage,
       handlePastedText,
+      handlePastedImages,
       removeTextAttachment,
     } = useChatStream({
       role,
@@ -93,19 +94,38 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
     const containerRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-    // ✅ 处理粘贴事件：长文本自动转附件
+    // ✅ 处理粘贴事件：支持文本附件和图片粘贴
     const handlePaste = useCallback(
       async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-        const text = e.clipboardData.getData('text/plain');
+        const clipboardData = e.clipboardData;
         
-        // 检查是否应该转换为附件
+        // 1. 优先检查是否有图片
+        const items = clipboardData.items;
+        const imageItems = Array.from(items).filter(item => item.type.startsWith('image/'));
+        
+        if (imageItems.length > 0) {
+          e.preventDefault(); // 阻止默认粘贴
+          
+          // 处理所有粘贴的图片
+          const files = imageItems
+            .map(item => item.getAsFile())
+            .filter((file): file is File => file !== null);
+          
+          if (files.length > 0) {
+            await handlePastedImages(files);
+          }
+          return;
+        }
+        
+        // 2. 检查是否是长文本需要转附件
+        const text = clipboardData.getData('text/plain');
         if (shouldConvertToAttachment(text)) {
           e.preventDefault(); // 阻止默认粘贴行为
           await handlePastedText(text);
         }
         // 否则使用默认粘贴行为
       },
-      [handlePastedText]
+      [handlePastedText, handlePastedImages]
     );
 
     // 暴露给父组件的方法
