@@ -1,9 +1,10 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useCallback } from "react";
 import { RefreshCw, Moon, Sun, X } from "lucide-react";
 
 import { RoleList } from "./components/RoleList";
 import { RoleEditor } from "./components/RoleEditor";
 import { ChatWindow } from "./components/ChatWindow";
+import ChatList from "./components/ChatList";
 
 import useIsMobile from "./hooks/useIsMobile";
 import useTheme from "./hooks/useTheme";
@@ -16,6 +17,9 @@ import CodePanelHost from "./codepanel/CodePanelHost";
 import MobileTopBar from "./components/MobileTopBar";
 import FloatingCodeButton from "./components/FloatingCodeButton";
 
+import type { Chat } from "./types";
+import { api } from "./services/api";
+
 function AppInner() {
   const isMobile = useIsMobile(768);
   const { isDark, toggleTheme } = useTheme();
@@ -24,7 +28,7 @@ function AppInner() {
   const { width: sidebarWidth, startResize } = useResizableSidebar({
     storageKey: "sidebarWidth",
     defaultWidth: 280,
-    minWidth: 200,
+    minWidth: 60,
     maxWidth: 600,
     disabled: isMobile,
   });
@@ -50,13 +54,41 @@ function AppInner() {
   const chatWindowRef = useRef<any>(null);
   const [autoSpeak, setAutoSpeak] = useState(false);
 
+  // ✅ Chat 状态管理
+  const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
+  const [chatListKey, setChatListKey] = useState(0);
+
   // ✅ 从 CodePanel Context 获取状态和控制函数
   const { open: codeOpen, width: codeWidth, togglePanel } = useCodePanel();
 
   const handleSelectRole = (role: any) => {
     setSelectedRole(role);
+    setSelectedChat(null); // 切换 agent 时重置选中的 chat
     if (isMobile) setSidebarOpen(false);
   };
+
+  // ✅ 新建 Chat
+  const handleNewChat = useCallback(async () => {
+    if (!selectedRole) return;
+    try {
+      const chat = await api.createChat(selectedRole.id);
+      setSelectedChat(chat);
+      setChatListKey((k) => k + 1); // 刷新列表
+    } catch (error) {
+      console.error("Failed to create chat:", error);
+    }
+  }, [selectedRole]);
+
+  // ✅ 选择 Chat
+  const handleSelectChat = useCallback((chat: Chat) => {
+    setSelectedChat(chat);
+    if (isMobile) setSidebarOpen(false);
+  }, [isMobile]);
+
+  // ✅ 刷新 Chat 列表（发送消息后调用）
+  const refreshChatList = useCallback(() => {
+    setChatListKey((k) => k + 1);
+  }, []);
 
   return (
     <div className="flex h-screen overflow-hidden font-sans bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
@@ -73,50 +105,45 @@ function AppInner() {
         className={`
           shrink-0 flex flex-col border-r border-slate-200 bg-slate-50
           dark:border-slate-800 dark:bg-slate-900/40
-          transition-transform duration-300 ease-in-out
+          transition-all duration-300 ease-in-out
           ${isMobile ? "fixed inset-y-0 left-0 w-[280px] z-50" : "relative z-0"}
           ${isMobile && !sidebarOpen ? "-translate-x-full" : "translate-x-0"}
         `}
         style={!isMobile ? { width: `${sidebarWidth}px` } : undefined}
       >
-        {/* 顶部栏 */}
-        <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-white dark:border-slate-800 dark:bg-slate-900">
-          <h1 className="font-bold text-xl text-blue-600 dark:text-blue-400">
-            Letta Chat
-          </h1>
-          <div className="flex items-center gap-2">
-            {isMobile && (
-              <button
-                onClick={() => setSidebarOpen(false)}
-                className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-600 dark:text-slate-300 md:hidden"
-                title="关闭侧边栏"
-              >
-                <X size={20} />
-              </button>
-            )}
-
+        {/* 顶部按钮栏 */}
+        <div className="p-2 border-b border-slate-200 flex items-center justify-center gap-2 bg-white dark:border-slate-800 dark:bg-slate-900">
+          {isMobile && (
             <button
-              onClick={toggleTheme}
-              className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-600 dark:text-slate-300"
-              title={isDark ? "切换到亮色" : "切换到暗色"}
+              onClick={() => setSidebarOpen(false)}
+              className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-600 dark:text-slate-300 md:hidden"
+              title="关闭侧边栏"
             >
-              {isDark ? <Sun size={20} /> : <Moon size={20} />}
+              <X size={20} />
             </button>
+          )}
 
-            <button
-              onClick={syncRoles}
-              disabled={isSyncing}
-              className={[
-                "p-2 rounded-full transition-colors",
-                "hover:bg-slate-100 dark:hover:bg-slate-800",
-                isSyncing ? "animate-spin text-blue-400" : "text-slate-600 dark:text-slate-300",
-                "disabled:opacity-60 disabled:cursor-not-allowed",
-              ].join(" ")}
-              title="Sync from Letta Cloud"
-            >
-              <RefreshCw size={20} />
-            </button>
-          </div>
+          <button
+            onClick={toggleTheme}
+            className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-600 dark:text-slate-300"
+            title={isDark ? "切换到亮色" : "切换到暗色"}
+          >
+            {isDark ? <Sun size={20} /> : <Moon size={20} />}
+          </button>
+
+          <button
+            onClick={syncRoles}
+            disabled={isSyncing}
+            className={[
+              "p-2 rounded-full transition-colors",
+              "hover:bg-slate-100 dark:hover:bg-slate-800",
+              isSyncing ? "animate-spin text-blue-400" : "text-slate-600 dark:text-slate-300",
+              "disabled:opacity-60 disabled:cursor-not-allowed",
+            ].join(" ")}
+            title="Sync from Letta Cloud"
+          >
+            <RefreshCw size={20} />
+          </button>
         </div>
 
         <RoleList
@@ -131,7 +158,22 @@ function AppInner() {
             setEditorRole(r);
             setIsEditorOpen(true);
           }}
+          isCollapsed={sidebarWidth < 120}
         />
+
+        {/* ✅ Chat 列表 - 在选中 Agent 后显示 */}
+        {selectedRole && (
+          <div className="border-t border-slate-200 dark:border-slate-800 flex-1 min-h-0 overflow-hidden">
+            <ChatList
+              key={chatListKey}
+              agentId={selectedRole.id}
+              selectedChatId={selectedChat?.id}
+              onSelectChat={handleSelectChat}
+              onNewChat={handleNewChat}
+              isCollapsed={sidebarWidth < 120}
+            />
+          </div>
+        )}
       </div>
 
       {/* 桌面端拖拽分隔条 */}
@@ -168,6 +210,8 @@ function AppInner() {
             <ChatWindow
               ref={chatWindowRef}
               role={selectedRole}
+              chatId={selectedChat?.id}
+              onMessageSent={refreshChatList}
               showHeader={!isMobile}
               defaultAutoSpeak={autoSpeak}
               onAutoSpeakChange={setAutoSpeak}

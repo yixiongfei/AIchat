@@ -38,8 +38,10 @@ export default function CodeArtifactCard({
   return (
     <div
       className={cn(
-        "my-2 rounded-xl bg-slate-900/40 ring-1 ring-white/10 p-3",
+        "my-2 rounded-xl p-3 ring-1",
         "flex items-center justify-between gap-3",
+        "bg-slate-100 ring-slate-300",
+        "dark:bg-slate-900/40 dark:ring-white/10",
         className
       )}
     >
@@ -54,9 +56,9 @@ export default function CodeArtifactCard({
         type="button"
         onClick={onOpen}
         className={cn(
-          "shrink-0 text-xs px-2 py-1 rounded-md",
-          "bg-slate-800/50 hover:bg-slate-800",
-          "ring-1 ring-white/10 transition"
+          "shrink-0 text-xs px-2 py-1 rounded-md ring-1 transition",
+          "bg-slate-200 hover:bg-slate-300 ring-slate-300",
+          "dark:bg-slate-800/50 dark:hover:bg-slate-800 dark:ring-white/10"
         )}
         title="在侧边栏打开"
       >

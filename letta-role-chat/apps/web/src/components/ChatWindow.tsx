@@ -10,6 +10,7 @@ import { Send, Loader2, Plus, Volume2, VolumeX, Square, ArrowUp, Info } from "lu
 import SelectionTTSButton from "./SelectionTTSButton";
 import MessageBubble from "./MessageBubble";
 import ComposerPreview from "./ComposerPreview";
+import ReasoningBlock from "./ReasoningBlock";
 import { useChatStream, shouldConvertToAttachment } from "../hooks/useChatStream";
 import { useBackgroundLoading } from "../hooks/useBackgroundLoading";
 
@@ -18,6 +19,8 @@ const cn = (...classes: Array<string | false | null | undefined>) =>
 
 interface ChatWindowProps {
   role: Role;
+  chatId?: string;
+  onMessageSent?: () => void;
   className?: string;
   headerClassName?: string;
   bodyClassName?: string;
@@ -43,6 +46,8 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
   (
     {
       role,
+      chatId,
+      onMessageSent,
       className,
       headerClassName,
       bodyClassName,
@@ -85,8 +90,12 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
       handlePastedText,
       handlePastedImages,
       removeTextAttachment,
+      reasoningSteps,
+      isReasoning,
     } = useChatStream({
       role,
+      chatId,
+      onMessageSent,
       defaultAutoSpeak,
       onAutoSpeakChange,
     });
@@ -240,6 +249,18 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
                 />
               ))}
 
+              {/* ✅ 推理过程显示块 - 在 loading 时显示 AI 的推理步骤 */}
+              {(isReasoning || reasoningSteps.length > 0) && (
+                <div className="flex justify-start">
+                  <div className="max-w-[85%] w-full">
+                    <ReasoningBlock
+                      steps={reasoningSteps}
+                      isLoading={isReasoning}
+                    />
+                  </div>
+                </div>
+              )}
+
               {isLoading &&
                 !messages.some((m) => m.role === "assistant" && m.id.startsWith("assistant-")) && (
                   <div className="flex justify-start">
@@ -311,7 +332,7 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
                   }
                 }}
                 placeholder={`Message ${role.name}...`}
-                className="flex-1 resize-none bg-transparent text-sm outline-none min-h-[40px] max-h-[120px] py-2 text-slate-100 placeholder:text-slate-400"
+                className="flex-1 resize-none bg-transparent text-base outline-none min-h-[40px] max-h-[120px] py-2 text-slate-100 placeholder:text-slate-400"
                 style={{ height: "40px" }}
               />
 

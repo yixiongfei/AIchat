@@ -4,6 +4,7 @@ import cors from "cors";
 import os from "os";
 import roleRoutes from "./routes/roles";
 import messageRoutes from "./routes/messages";
+import chatRoutes from "./routes/chats";
 import { initDb } from "./storage/db";
 import "dotenv/config";
 import tts from "./routes/tts";
@@ -21,6 +22,7 @@ const avatarsDir = process.env.AVATAR_DIR || path.resolve(process.cwd(), "upload
 app.use('/api/avatars', express.static(avatarsDir));
 app.use("/api/roles", roleRoutes);
 app.use("/api/messages", messageRoutes);
+app.use("/api/chats", chatRoutes);
 
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error(err.stack);

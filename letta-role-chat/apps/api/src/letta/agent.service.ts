@@ -9,7 +9,8 @@ type MemoryBlock = { label: string; value?: string | null };
 type CloudAgent = {
   id: string;
   name: string;
-  memoryBlocks?: MemoryBlock[];
+  memory_blocks?: MemoryBlock[];  // 新版 SDK 使用下划线格式
+  memoryBlocks?: MemoryBlock[];   // 兼容旧版
 };
 
 export const agentService = {
@@ -17,18 +18,24 @@ export const agentService = {
   // ✅ 新增 pruneDeleted: 同步成功后是否清理本地已不存在于云端的记录（默认 true）
   async syncFromCloud(pruneDeleted: boolean = true) {
     try {
-      // 1) 拉取云端列表（当前存在的 agent）
-      const cloudAgents = (await lettaClient.agents.list()) as CloudAgent[]; // Letta SDK 支持 list() 获取 agents [1](https://deepwiki.com/letta-ai/letta/10.2-typescript-sdk)[2](https://docs.letta.com/api/typescript)
+      // 1) 拉取云端列表（新版 SDK 返回分页对象，需要迭代）
+      const agentsPage = await lettaClient.agents.list();
+      const cloudAgents: CloudAgent[] = [];
+      for await (const agent of agentsPage) {
+        cloudAgents.push(agent as CloudAgent);
+      }
 
       // 2) 预先构建云端 id 集合（用于 prune）
       const cloudIdSet = new Set(cloudAgents.map(a => a.id));
 
       // 3) Upsert：逐个写入本地
       for (const agent of cloudAgents) {
+        // 新版 SDK 使用 memory_blocks，兼容旧版 memoryBlocks
+        const memoryBlocks = agent.memory_blocks || agent.memoryBlocks || [];
         const persona =
-          agent.memoryBlocks?.find((b: MemoryBlock) => b.label === "persona")?.value ?? "";
+          memoryBlocks.find((b: MemoryBlock) => b.label === "persona")?.value ?? "";
         const human =
-          agent.memoryBlocks?.find((b: MemoryBlock) => b.label === "human")?.value ?? "";
+          memoryBlocks.find((b: MemoryBlock) => b.label === "human")?.value ?? "";
 
         const [rows]: any = await pool.query(
           "SELECT id FROM agents WHERE agent_id = ?",
@@ -88,9 +95,10 @@ export const agentService = {
   },
 
   async createRole(name: string, persona: string, human: string, voice?: string, speed?: number, pitch?: string, style?: string, avatarBase64?: string) {
+    // 新版 SDK 使用下划线格式的参数名
     const agent = await lettaClient.agents.create({
       name,
-      memoryBlocks: [
+      memory_blocks: [
         { label: "persona", value: persona },
         { label: "human", value: human },
       ],

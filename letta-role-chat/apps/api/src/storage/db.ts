@@ -37,18 +37,53 @@ export const initDb = async () => {
       )
     `);
 
-    // 创建 messages 表
+    // 创建 chats 表 (新增)
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS chats (
+        id VARCHAR(255) PRIMARY KEY,
+        agent_id VARCHAR(255) NOT NULL,
+        letta_conversation_id VARCHAR(255),
+        title VARCHAR(255) DEFAULT '新对话',
+        created_at BIGINT,
+        updated_at BIGINT,
+        FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+        INDEX idx_agent_updated (agent_id, updated_at DESC),
+        INDEX idx_letta_conversation (letta_conversation_id)
+      )
+    `);
+
+    // 创建 messages 表 (添加 chat_id 外键)
     await connection.query(`
       CREATE TABLE IF NOT EXISTS messages (
         id VARCHAR(255) PRIMARY KEY,
         agent_id VARCHAR(255),
+        chat_id VARCHAR(255),
         role ENUM('user', 'assistant') NOT NULL,
         content TEXT NOT NULL,
         timestamp BIGINT,
         images LONGTEXT,
-        FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+        FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+        FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+        INDEX idx_chat_timestamp (chat_id, timestamp)
       )
     `);
+
+    // 迁移：检查并添加 chat_id 列（如果不存在）
+    try {
+      const [columns] = await connection.query(`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'messages' AND COLUMN_NAME = 'chat_id'
+      `);
+      if ((columns as any[]).length === 0) {
+        console.log('Migrating: Adding chat_id column to messages table...');
+        await connection.query(`ALTER TABLE messages ADD COLUMN chat_id VARCHAR(255) AFTER agent_id`);
+        await connection.query(`ALTER TABLE messages ADD INDEX idx_chat_timestamp (chat_id, timestamp)`);
+        console.log('Migration complete: chat_id column added');
+      }
+    } catch (migrationError) {
+      console.error('Migration error (chat_id):', migrationError);
+    }
+    
     console.log('Database initialized successfully');
   } catch (error) {
     console.error('Failed to initialize database:', error);

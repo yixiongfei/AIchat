@@ -15,14 +15,15 @@ interface AttachmentInfo {
 /**
  * 发送消息（流式）
  * POST /api/messages/:roleId
- * Body: { message: string, images?: string[], attachments?: AttachmentInfo[] }
+ * Body: { message: string, images?: string[], attachments?: AttachmentInfo[], chatId?: string }
  */
 router.post("/:roleId", async (req, res) => {
   const { roleId } = req.params;
-  const { message, images, attachments } = req.body as {
+  const { message, images, attachments, chatId } = req.body as {
     message: string;
     images?: string[];
     attachments?: AttachmentInfo[];
+    chatId?: string;
   };
 
   try {
@@ -45,7 +46,7 @@ router.post("/:roleId", async (req, res) => {
         : attachmentContents.join('\n');
     }
 
-    await messageService.sendMessageStream(roleId, role.agentId, fullMessage, res, images);
+    await messageService.sendMessageStream(roleId, role.agentId, fullMessage, res, images, chatId);
   } catch (error) {
     console.error("Route error:", error);
     if (!res.headersSent) {

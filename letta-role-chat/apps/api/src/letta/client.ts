@@ -1,5 +1,5 @@
 
-import { LettaClient } from "@letta-ai/letta-client";
+import { Letta } from "@letta-ai/letta-client";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -11,7 +11,8 @@ if (!LETTA_API_KEY) {
   console.warn("WARNING: LETTA_API_KEY is not set. This is required for Letta Cloud.");
 }
 
-export const lettaClient = new LettaClient({
-  baseUrl: LETTA_BASE_URL,  // v0.x 常用 baseUrl
-  token: LETTA_API_KEY,     // v0.x 常用 token
+// 新版 SDK (v1.x) 使用 Letta 类和 apiKey/baseURL 配置
+export const lettaClient = new Letta({
+  apiKey: LETTA_API_KEY,
+  baseURL: LETTA_BASE_URL,
 });

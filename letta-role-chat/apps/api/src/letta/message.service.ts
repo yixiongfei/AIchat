@@ -157,76 +157,119 @@ function chooseStrategy(text: string, images?: string[], config = DEFAULT_STRATE
   return "stream";
 }
 
+/**
+ * 从 chatId 获取 Letta conversation_id
+ */
+async function getLettaConversationId(chatId?: string): Promise<string | null> {
+  if (!chatId) return null;
+  
+  try {
+    const [rows] = await pool.query(
+      'SELECT letta_conversation_id FROM chats WHERE id = ?',
+      [chatId]
+    );
+    const chats = rows as any[];
+    return chats.length > 0 ? chats[0].letta_conversation_id : null;
+  } catch (error) {
+    console.error("[getLettaConversationId] Error:", error);
+    return null;
+  }
+}
+
 export const messageService = {
   /**
    * 智能消息发送（自动选择最优策略）
    */
-  async sendMessageStream(roleId: string, agentId: string, text: string, res: Response, images?: string[]) {
+  async sendMessageStream(roleId: string, agentId: string, text: string, res: Response, images?: string[], chatId?: string) {
     const strategy = chooseStrategy(text, images);
     
     if (strategy === "stream") {
-      return this.sendMessageStreamSync(roleId, agentId, text, res);
+      return this.sendMessageStreamSync(roleId, agentId, text, res, chatId);
     } else {
-      return this.sendMessageAsync(roleId, agentId, text, res, images);
+      return this.sendMessageAsync(roleId, agentId, text, res, images, chatId);
     }
   },
 
   /**
    * ========================================
-   * 方式一：同步流式 (createStream)
+   * 方式一：同步流式 (streaming=true)
    * ========================================
    * 真正的 token-by-token 流式响应，延迟最低
+   * 新版 SDK (v1.x) 使用 streaming: true 参数
    */
-  async sendMessageStreamSync(roleId: string, agentId: string, text: string, res: Response) {
+  async sendMessageStreamSync(roleId: string, agentId: string, text: string, res: Response, chatId?: string) {
     // SSE headers
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
 
+    // 获取 Letta conversation_id（如果有）
+    const lettaConversationId = await getLettaConversationId(chatId);
+
     // 1. 保存用户消息到数据库
     const userMsgId = uuidv4();
     await pool.query(
-      'INSERT INTO messages (id, agent_id, role, content, timestamp, images) VALUES (?, ?, ?, ?, ?, ?)',
-      [userMsgId, roleId, 'user', text, Date.now(), null]
+      'INSERT INTO messages (id, agent_id, chat_id, role, content, timestamp, images) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [userMsgId, roleId, chatId || null, 'user', text, Date.now(), null]
     );
+    
+    // 更新 chat 的 updated_at
+    if (chatId) {
+      await pool.query('UPDATE chats SET updated_at = ? WHERE id = ?', [Date.now(), chatId]);
+    }
 
     let assistantContent = "";
 
     try {
-      console.log(`[Stream] Starting streaming for agent ${agentId}...`);
+      console.log(`[Stream] Starting streaming for agent ${agentId}${lettaConversationId ? `, conversation: ${lettaConversationId}` : ''}...`);
 
-      // ✅ 使用同步流式 API
-      const stream = await lettaClient.agents.messages.createStream(agentId, {
-        messages: [{ role: "user", content: wrapUserInput(text) }],
-        streamTokens: DEFAULT_STRATEGY.streamTokens,
-        includePings: DEFAULT_STRATEGY.includePings,
-        useAssistantMessage: true,
-      });
+      let stream: AsyncIterable<any>;
+
+      // ✅ 根据是否有 conversation_id 选择不同的 API
+      if (lettaConversationId) {
+        // 使用 conversation 专用 API，确保消息隔离
+        stream = await lettaClient.conversations.messages.create(lettaConversationId, {
+          input: wrapUserInput(text),
+          stream_tokens: DEFAULT_STRATEGY.streamTokens,
+          include_pings: DEFAULT_STRATEGY.includePings,
+        });
+      } else {
+        // 使用传统的 agent API（向后兼容）
+        stream = await lettaClient.agents.messages.create(agentId, {
+          input: wrapUserInput(text),
+          stream_tokens: DEFAULT_STRATEGY.streamTokens,
+          include_pings: DEFAULT_STRATEGY.includePings,
+          streaming: true,
+        });
+      }
 
       // 通知前端开始流式
       res.write(`data: ${JSON.stringify({ type: "stream_started" })}\n\n`);
 
       // ✅ 处理流式响应
       for await (const chunk of stream) {
+        // 新版 SDK 使用 message_type（下划线格式）
+        const messageType = (chunk as any).message_type || (chunk as any).messageType;
+
         // 跳过 ping 消息
-        if (chunk.messageType === "ping") {
+        if (messageType === "ping") {
           continue;
         }
 
         // 处理停止原因
-        if (chunk.messageType === "stop_reason") {
-          console.log(`[Stream] Stop reason: ${(chunk as any).stopReason}`);
+        if (messageType === "stop_reason") {
+          console.log(`[Stream] Stop reason: ${(chunk as any).stop_reason || (chunk as any).stopReason}`);
           continue;
         }
 
         // 处理使用统计
-        if (chunk.messageType === "usage_statistics") {
+        if (messageType === "usage_statistics") {
           console.log(`[Stream] Usage:`, chunk);
           continue;
         }
 
         // ✅ 处理 assistant 消息
-        if (chunk.messageType === "assistant_message") {
+        if (messageType === "assistant_message") {
           let content = "";
           
           if (typeof chunk.content === "string") {
@@ -245,9 +288,22 @@ export const messageService = {
           }
         }
 
+        // ✅ 处理推理消息（reasoning_message）
+        if (messageType === "reasoning_message") {
+          const reasoningContent = (chunk as any).reasoning || "";
+          if (reasoningContent) {
+            res.write(`data: ${JSON.stringify({ 
+              type: "reasoning", 
+              content: reasoningContent,
+              source: (chunk as any).source || "unknown"
+            })}\n\n`);
+          }
+        }
+
         // 处理工具调用消息（可选：通知前端正在思考）
-        if (chunk.messageType === "tool_call_message") {
-          res.write(`data: ${JSON.stringify({ type: "thinking", tool: (chunk as any).toolCall?.name })}\n\n`);
+        if (messageType === "tool_call_message") {
+          const toolCall = (chunk as any).tool_call || (chunk as any).toolCall;
+          res.write(`data: ${JSON.stringify({ type: "thinking", tool: toolCall?.name })}\n\n`);
         }
       }
 
@@ -262,8 +318,8 @@ export const messageService = {
     if (assistantContent) {
       const assistantMsgId = uuidv4();
       await pool.query(
-        'INSERT INTO messages (id, agent_id, role, content, timestamp) VALUES (?, ?, ?, ?, ?)',
-        [assistantMsgId, roleId, 'assistant', assistantContent, Date.now()]
+        'INSERT INTO messages (id, agent_id, chat_id, role, content, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
+        [assistantMsgId, roleId, chatId || null, 'assistant', assistantContent, Date.now()]
       );
     }
 
@@ -277,12 +333,16 @@ export const messageService = {
    * 方式二：异步轮询 (createAsync)
    * ========================================
    * 适用于多模态消息和复杂任务
+   * 新版 SDK (v1.x) API 变化适配
    */
-  async sendMessageAsync(roleId: string, agentId: string, text: string, res: Response, images?: string[]) {
+  async sendMessageAsync(roleId: string, agentId: string, text: string, res: Response, images?: string[], chatId?: string) {
     // SSE headers
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
+
+    // 获取 Letta conversation_id（如果有）
+    const lettaConversationId = await getLettaConversationId(chatId);
 
     // 1. 保存用户消息到数据库（不保存图片 base64，太大了）
     // 图片仍会发送给 Letta API，但不持久化到本地数据库
@@ -291,19 +351,26 @@ export const messageService = {
     // 只记录是否有图片，不保存实际内容
     const imageNote = hasImages ? `[包含 ${images.length} 张图片]` : null;
     await pool.query(
-      'INSERT INTO messages (id, agent_id, role, content, timestamp, images) VALUES (?, ?, ?, ?, ?, ?)',
-      [userMsgId, roleId, 'user', text + (imageNote ? `\n${imageNote}` : ''), Date.now(), null]
+      'INSERT INTO messages (id, agent_id, chat_id, role, content, timestamp, images) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [userMsgId, roleId, chatId || null, 'user', text + (imageNote ? `\n${imageNote}` : ''), Date.now(), null]
     );
+    
+    // 更新 chat 的 updated_at
+    if (chatId) {
+      await pool.query('UPDATE chats SET updated_at = ? WHERE id = ?', [Date.now(), chatId]);
+    }
 
     try {
       // ✅ 构建 Letta 官方多模态消息内容
       const messageContent = buildMessageContent(text, images);
 
       // ✅ 使用异步 API 创建后台任务
-      console.log(`[Async] Creating async message for agent ${agentId}...`);
+      console.log(`[Async] Creating async message for agent ${agentId}${lettaConversationId ? `, conversation: ${lettaConversationId}` : ''}...`);
       
+      // 新版 SDK 使用不同的参数名（下划线格式）
       const run = await lettaClient.agents.messages.createAsync(agentId, {
-        messages: [{ role: "user", content: messageContent }],
+        input: typeof messageContent === 'string' ? messageContent : undefined,
+        messages: typeof messageContent !== 'string' ? [{ role: "user" as const, content: messageContent }] : undefined,
       });
 
       const runId = run.id;
@@ -345,19 +412,34 @@ export const messageService = {
         // 检查是否完成
         if (currentRun.status === "completed") {
           // ✅ 获取完整的运行结果（包含消息）
-          const messages = await lettaClient.runs.messages.list(runId);
+          const messagesPage = await lettaClient.runs.messages.list(runId);
           
-          // 提取 assistant 消息（LettaMessageUnion 使用 messageType 而非 role）
-          for (const msg of messages) {
+          // 提取 assistant 消息（新版 SDK 使用 message_type 而非 messageType）
+          for await (const msg of messagesPage) {
+            const messageType = (msg as any).message_type || (msg as any).messageType;
+            
+            // ✅ 处理推理消息
+            if (messageType === "reasoning_message") {
+              const reasoningContent = (msg as any).reasoning || "";
+              if (reasoningContent) {
+                res.write(`data: ${JSON.stringify({ 
+                  type: "reasoning", 
+                  content: reasoningContent,
+                  source: (msg as any).source || "unknown"
+                })}\n\n`);
+              }
+            }
+            
             // 检查是否是 AssistantMessage 类型
-            if (msg.messageType === "assistant_message") {
+            if (messageType === "assistant_message") {
               let content = "";
+              const msgContent = (msg as any).content;
               // AssistantMessage.content 可能是 string 或 content parts 数组
-              if (typeof msg.content === "string") {
-                content = msg.content;
-              } else if (Array.isArray(msg.content)) {
+              if (typeof msgContent === "string") {
+                content = msgContent;
+              } else if (Array.isArray(msgContent)) {
                 // 如果是数组，提取文本部分
-                content = msg.content
+                content = msgContent
                   .filter((part: any) => part.type === "text")
                   .map((part: any) => part.text)
                   .join("");
@@ -388,8 +470,8 @@ export const messageService = {
       if (assistantContent) {
         const assistantMsgId = uuidv4();
         await pool.query(
-          'INSERT INTO messages (id, agent_id, role, content, timestamp) VALUES (?, ?, ?, ?, ?)',
-          [assistantMsgId, roleId, 'assistant', assistantContent, Date.now()]
+          'INSERT INTO messages (id, agent_id, chat_id, role, content, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
+          [assistantMsgId, roleId, chatId || null, 'assistant', assistantContent, Date.now()]
         );
       }
 
@@ -403,11 +485,18 @@ export const messageService = {
     }
   },
 
-  async getHistory(roleId: string) {
-    const [rows]: any = await pool.query(
-      'SELECT * FROM messages WHERE agent_id = ? ORDER BY timestamp ASC',
-      [roleId]
-    );
+  async getHistory(roleId: string, chatId?: string) {
+    let query = 'SELECT * FROM messages WHERE agent_id = ?';
+    const params: any[] = [roleId];
+    
+    if (chatId) {
+      query += ' AND chat_id = ?';
+      params.push(chatId);
+    }
+    
+    query += ' ORDER BY timestamp ASC';
+    
+    const [rows]: any = await pool.query(query, params);
     return rows.map((row: any) => ({
       id: row.id,
       role: row.role,

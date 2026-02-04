@@ -64,10 +64,10 @@ export default function AssistantMessageContent(props: {
                             key={`md-${i}`}
                             text={seg.content}
                             className="
-                prose prose-invert break-words
+                prose prose-slate dark:prose-invert break-words max-w-none
                 prose-headings:mt-4 prose-headings:mb-2
                 prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg
-                prose-p:my-2
+                prose-p:my-2 prose-p:text-base
                 prose-ul:my-2 prose-ol:my-2
                 prose-li:my-1
                 prose-li:leading-relaxed

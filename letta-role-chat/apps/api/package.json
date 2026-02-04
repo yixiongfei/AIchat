@@ -7,7 +7,7 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@letta-ai/letta-client": "^0.1.127",
+    "@letta-ai/letta-client": "^1.7.7",
     "ai": "^6.0.41",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",

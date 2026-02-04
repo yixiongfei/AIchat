@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Role, Message } from "../types";
-import { api } from "../services/api";
+import { api, ReasoningStep } from "../services/api";
 import useTTS from "../hooks/useTTS";
 import { previewText, stripAllFencedCodes } from "../utils/codeSegmentation";
 import { useAgentLoading } from "./useBackgroundLoading";
@@ -83,6 +83,8 @@ function fileToBase64(file: File): Promise<string> {
 
 export interface UseChatStreamOptions {
   role: Role;
+  chatId?: string;
+  onMessageSent?: () => void;
   defaultAutoSpeak?: boolean;
   onAutoSpeakChange?: (value: boolean) => void;
   autoOpenLongCode?: boolean; // 这里不直接用，但保留给上层
@@ -90,6 +92,8 @@ export interface UseChatStreamOptions {
 
 export function useChatStream({
   role,
+  chatId,
+  onMessageSent,
   defaultAutoSpeak = false,
   onAutoSpeakChange,
 }: UseChatStreamOptions) {
@@ -102,6 +106,10 @@ export function useChatStream({
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [textAttachments, setTextAttachments] = useState<TextAttachment[]>([]);
   const [autoSpeak, setAutoSpeak] = useState(defaultAutoSpeak);
+  
+  // ✅ 推理过程状态
+  const [reasoningSteps, setReasoningSteps] = useState<ReasoningStep[]>([]);
+  const [isReasoning, setIsReasoning] = useState(false);
 
   // MessageBubble 代码展开（历史消息）
   const [expandedMap, setExpandedMap] = useState<Record<string, boolean>>({});
@@ -172,7 +180,7 @@ export function useChatStream({
     // ✅ 更新当前 roleId ref（用于消息隔离）
     currentRoleIdRef.current = role.id;
     
-    // ✅ 切换角色时立即清空消息
+    // ✅ 切换角色或 chat 时立即清空消息
     // 注意：不再重置 isLoading，因为现在使用全局状态管理
     // 旧 agent 的请求会继续在后台完成，其 loading 状态由全局管理器跟踪
     // 这样用户可以看到后台仍有请求在进行的提示
@@ -180,7 +188,14 @@ export function useChatStream({
     
     const loadHistory = async () => {
       try {
-        const history = await api.getHistory(role.id);
+        // ✅ 如果有 chatId，从 chat 加载消息；否则使用旧逻辑
+        let history;
+        if (chatId) {
+          history = await api.getChatMessages(chatId);
+        } else {
+          history = await api.getHistory(role.id);
+        }
+        
         if (mounted && currentRoleIdRef.current === role.id) {
           setMessages(history);
         }
@@ -192,7 +207,7 @@ export function useChatStream({
     return () => {
       mounted = false;
     };
-  }, [role.id]);
+  }, [role.id, chatId]);
 
   // 卸载清理
   useEffect(() => {
@@ -417,6 +432,10 @@ export function useChatStream({
     setLoading(true, "正在思考...");
     clearImages(); // 发送后立即清掉预览（并释放 objectURL）
     clearTextAttachments(); // 清空文本附件
+    
+    // ✅ 重置推理状态
+    setReasoningSteps([]);
+    setIsReasoning(true);
 
     console.log("正在思考...");
 
@@ -464,7 +483,11 @@ export function useChatStream({
           // ✅ 响应完成：无论是否切换了 agent，都清除该 agent 的 loading 状态
           // 全局状态管理器会自动更新 UI
           setLoading(false);
+          setIsReasoning(false);
           activeRequestIdRef.current = "";
+          
+          // ✅ 通知外部刷新 Chat 列表
+          onMessageSent?.();
           
           // 消息隔离：如果已切换到其他 agent，不更新当前界面的消息显示
           if (currentRoleIdRef.current !== requestRoleId) {
@@ -479,12 +502,27 @@ export function useChatStream({
           if (autoSpeak) await flushStream();
         },
         base64Images,
-        attachmentInfos.length > 0 ? attachmentInfos : undefined
+        attachmentInfos.length > 0 ? attachmentInfos : undefined,
+        // ✅ 推理回调
+        (step) => {
+          if (activeRequestIdRef.current !== requestId) return;
+          if (currentRoleIdRef.current !== requestRoleId) return;
+          
+          setReasoningSteps((prev) => [...prev, step]);
+        },
+        // ✅ 工具调用回调
+        (tool) => {
+          if (activeRequestIdRef.current !== requestId) return;
+          console.log(`[Thinking] 使用工具: ${tool}`);
+        },
+        // ✅ chatId 参数
+        chatId
       );
     } catch (e) {
       console.error("Chat error:", e);
       if (activeRequestIdRef.current === requestId) {
         setLoading(false);
+        setIsReasoning(false);
         activeRequestIdRef.current = "";
       }
       console.error("发送消息失败，请重试");
@@ -495,6 +533,7 @@ export function useChatStream({
     textAttachments,
     isLoading,
     role.id,
+    chatId,
     autoSpeak,
     appendStream,
     flushStream,
@@ -502,6 +541,7 @@ export function useChatStream({
     clearImages,
     clearTextAttachments,
     setLoading,
+    onMessageSent,
   ]);
 
   return {
@@ -514,6 +554,10 @@ export function useChatStream({
     autoSpeak,
     uploadedImages,
     textAttachments,
+    
+    // ✅ 推理状态
+    reasoningSteps,
+    isReasoning,
 
     // code preview
     inputCodeCards,

@@ -32,47 +32,73 @@
   }
 }
 
-/* Ensure form controls inherit text color and placeholders are readable in dark mode */
+/* Ensure form controls inherit text color and placeholders are readable */
 textarea, input, select, button {
   color: inherit;
   background-color: transparent;
 }
 
+/* 亮色模式 placeholder */
 textarea::placeholder, input::placeholder {
-  color: rgba(15,23,42,0.5); /* slate-900 at reduced opacity for light mode */
+  color: rgba(71, 85, 105, 0.7); /* slate-600 */
 }
 
-@media (prefers-color-scheme: dark) {
-  textarea::placeholder, input::placeholder {
-    color: rgba(255,255,255,0.6);
-  }
+/* 暗色模式 placeholder */
+.dark textarea::placeholder, .dark input::placeholder {
+  color: rgba(148, 163, 184, 0.7); /* slate-400 */
 }
 
-/* ✅ 自定义滚动条样式 - 暗色主题 */
-/* Webkit 浏览器 (Chrome, Safari, Edge) */
+/* ✅ 自定义滚动条样式 - 亮色主题 */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.3); /* slate-900 with opacity */
+  background: rgba(226, 232, 240, 0.5); /* slate-200 */
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(51, 65, 85, 0.8); /* slate-700 */
+  background: rgba(148, 163, 184, 0.8); /* slate-400 */
   border-radius: 4px;
   transition: background 0.2s;
 }
 
 ::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.9); /* slate-500 */
+}
+
+/* Firefox 亮色 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.8) rgba(226, 232, 240, 0.5);
+}
+
+/* ✅ 隐藏滚动条的工具类 */
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;  /* Chrome, Safari and Opera */
+}
+
+/* ✅ 暗色主题滚动条 */
+.dark ::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.3); /* slate-900 */
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(51, 65, 85, 0.8); /* slate-700 */
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
   background: rgba(71, 85, 105, 0.9); /* slate-600 */
 }
 
-/* Firefox */
-* {
-  scrollbar-width: thin;
+.dark * {
   scrollbar-color: rgba(51, 65, 85, 0.8) rgba(15, 23, 42, 0.3);
 }
 

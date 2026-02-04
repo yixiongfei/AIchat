@@ -28,10 +28,25 @@ export interface Message {
   attachments?: MessageAttachment[];  // 文本附件支持
 }
 
-export interface Conversation {
+/** 聊天会话 */
+export interface Chat {
   id: string;
-  roleId: string;
+  agent_id: string;
+  letta_conversation_id?: string;  // Letta 平台的 conversation ID
   title: string;
-  lastMessage?: string;
-  updatedAt: number;
+  created_at: number;
+  updated_at: number;
+  last_message?: string;
+  message_count?: number;
+}
+
+/** 聊天列表响应 */
+export interface ChatsResponse {
+  chats: Chat[];
+  total: number;
+}
+
+/** 聊天消息响应 */
+export interface MessagesResponse {
+  messages: Message[];
 }

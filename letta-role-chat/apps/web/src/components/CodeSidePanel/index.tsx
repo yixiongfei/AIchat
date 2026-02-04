@@ -137,7 +137,7 @@ export function CodeSidePanel({
       {!selectedArtifact && (
         <div className="shrink-0 h-12 px-4 flex items-center justify-between bg-slate-950/80 backdrop-blur border-b border-white/10">
           <div className="flex items-center gap-2 text-slate-100">
-            <span className="font-semibold">Artifacts</span>
+            <span className="font-semibold">代码块</span>
             {artifacts.length > 0 && (
               <span className="text-xs text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded">
                 {artifacts.length}
