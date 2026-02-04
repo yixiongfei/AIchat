@@ -236,30 +236,40 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
         <div ref={scrollRef} className={cn("flex-1 overflow-y-auto px-4 py-4", bodyClassName)}>
           <div ref={containerRef} className="w-full">
             <div className={cn("mx-auto w-full max-w-3xl space-y-2", bodyInnerClassName)}>
-              {messages.map((msg) => (
-                <MessageBubble
-                  key={msg.id}
-                  msg={msg}
-                  role={role}
-                  userBubbleClassName={userBubbleClassName}
-                  assistantBubbleClassName={assistantBubbleClassName}
-                  expanded={!!expandedMap[msg.id]}
-                  onToggleExpandedById={toggleExpanded}
-                  autoOpenLongCode={autoOpenLongCode}
-                />
-              ))}
+              {messages.map((msg, index) => {
+                // 检查是否需要在这条消息后显示推理块
+                // 条件：当前是用户消息，且是最后一条消息或下一条是正在生成的 AI 回复
+                const isLastUserMsg = msg.role === "user" && (
+                  index === messages.length - 1 || 
+                  (index === messages.length - 2 && messages[index + 1]?.role === "assistant" && messages[index + 1]?.id.startsWith("assistant-"))
+                );
+                const showReasoningAfter = isLastUserMsg && (isReasoning || reasoningSteps.length > 0);
 
-              {/* ✅ 推理过程显示块 - 在 loading 时显示 AI 的推理步骤 */}
-              {(isReasoning || reasoningSteps.length > 0) && (
-                <div className="flex justify-start">
-                  <div className="max-w-[85%] w-full">
-                    <ReasoningBlock
-                      steps={reasoningSteps}
-                      isLoading={isReasoning}
+                return (
+                  <React.Fragment key={msg.id}>
+                    <MessageBubble
+                      msg={msg}
+                      role={role}
+                      userBubbleClassName={userBubbleClassName}
+                      assistantBubbleClassName={assistantBubbleClassName}
+                      expanded={!!expandedMap[msg.id]}
+                      onToggleExpandedById={toggleExpanded}
+                      autoOpenLongCode={autoOpenLongCode}
                     />
-                  </div>
-                </div>
-              )}
+                    {/* ✅ 推理过程显示块 - 在用户消息后、AI 回复前显示 */}
+                    {showReasoningAfter && (
+                      <div className="flex justify-start">
+                        <div className="w-full">
+                          <ReasoningBlock
+                            steps={reasoningSteps}
+                            isLoading={isReasoning}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </React.Fragment>
+                );
+              })}
 
               {isLoading &&
                 !messages.some((m) => m.role === "assistant" && m.id.startsWith("assistant-")) && (

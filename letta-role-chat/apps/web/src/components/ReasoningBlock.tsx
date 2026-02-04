@@ -2,6 +2,7 @@
 import React, { useState, useMemo } from "react";
 import { ChevronDown, ChevronRight, Brain, Clock } from "lucide-react";
 import type { ReasoningStep } from "../services/api";
+import Markdown from "./Markdown";
 
 const cn = (...classes: Array<string | false | null | undefined>) =>
   classes.filter(Boolean).join(" ");
@@ -14,14 +15,14 @@ export interface ReasoningBlockProps {
 
 /**
  * 推理过程折叠块组件
- * 显示 AI 的内部推理步骤，可以折叠/展开
+ * 显示 AI 的完整推理内容，默认展开，可折叠
  */
 export default function ReasoningBlock({
   steps,
   isLoading = false,
   className,
 }: ReasoningBlockProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(true); // 默认展开
 
   // 计算总推理时间
   const duration = useMemo(() => {
@@ -33,12 +34,16 @@ export default function ReasoningBlock({
     return `${(ms / 1000).toFixed(1)}s`;
   }, [steps]);
 
-  // 合并所有推理内容用于预览
-  const previewText = useMemo(() => {
-    const allText = steps.map((s) => s.content).join(" ");
-    if (allText.length <= 60) return allText;
-    return allText.slice(0, 60) + "...";
+  // 合并所有推理内容为完整文本
+  const fullContent = useMemo(() => {
+    return steps.map((s) => s.content).join("");
   }, [steps]);
+
+  // 折叠时的预览文本
+  const previewText = useMemo(() => {
+    if (fullContent.length <= 80) return fullContent;
+    return fullContent.slice(0, 80) + "...";
+  }, [fullContent]);
 
   if (steps.length === 0 && !isLoading) {
     return null;
@@ -47,9 +52,9 @@ export default function ReasoningBlock({
   return (
     <div
       className={cn(
-        "mb-2 rounded-lg border overflow-hidden",
-        "border-slate-300 bg-slate-100",
-        "dark:border-slate-700/50 dark:bg-slate-800/30",
+        "mb-3 rounded-lg border overflow-hidden",
+        "border-slate-300/50 bg-slate-100/50",
+        "dark:border-slate-700/30 dark:bg-slate-800/20",
         className
       )}
     >
@@ -57,32 +62,25 @@ export default function ReasoningBlock({
       <button
         type="button"
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center gap-2 px-3 py-2 transition text-left bg-slate-200/50 hover:bg-slate-200 dark:bg-slate-700/30 dark:hover:bg-slate-700/50"
+        className="w-full flex items-center gap-2 px-3 py-1.5 transition text-left hover:bg-slate-200/50 dark:hover:bg-slate-700/30"
         aria-expanded={isExpanded}
       >
         <div className="flex items-center gap-2 flex-1 min-w-0">
           {isExpanded ? (
-            <ChevronDown size={14} className="text-slate-500 dark:text-slate-400 shrink-0" />
+            <ChevronDown size={14} className="text-slate-400 dark:text-slate-500 shrink-0" />
           ) : (
-            <ChevronRight size={14} className="text-slate-500 dark:text-slate-400 shrink-0" />
+            <ChevronRight size={14} className="text-slate-400 dark:text-slate-500 shrink-0" />
           )}
           
-          <Brain size={14} className="text-purple-500 dark:text-purple-400 shrink-0" />
+          <Brain size={14} className="text-purple-400 dark:text-purple-500 shrink-0" />
           
-          <span className="text-sm text-slate-700 dark:text-slate-300">
+          <span className="text-xs text-slate-500 dark:text-slate-400">
             {isLoading ? "推理中..." : "推理过程"}
           </span>
 
-          {/* 推理步骤数量 */}
-          {steps.length > 0 && (
-            <span className="text-xs px-1.5 py-0.5 rounded text-slate-600 bg-slate-200 dark:text-slate-400 dark:bg-slate-800">
-              {steps.length} 步
-            </span>
-          )}
-
           {/* 耗时 */}
           {duration && (
-            <span className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-500">
+            <span className="flex items-center gap-1 text-xs text-slate-400 dark:text-slate-500">
               <Clock size={10} />
               {duration}
             </span>
@@ -91,34 +89,21 @@ export default function ReasoningBlock({
 
         {/* 折叠时显示预览 */}
         {!isExpanded && previewText && (
-          <span className="text-xs text-slate-500 truncate max-w-[200px]">
+          <span className="text-xs text-slate-400 dark:text-slate-500 truncate max-w-[300px]">
             {previewText}
           </span>
         )}
       </button>
 
-      {/* 展开的内容 */}
+      {/* 展开的内容 - 合并显示完整思考，使用 Markdown 渲染 */}
       {isExpanded && (
-        <div className="px-3 py-2 space-y-2 max-h-64 overflow-y-auto">
-          {steps.map((step, index) => (
-            <div
-              key={index}
-              className="text-sm pl-3 border-l-2 text-slate-700 border-purple-400/50 dark:text-slate-300/90 dark:border-purple-500/30"
-            >
-              <p className="whitespace-pre-wrap break-words">{step.content}</p>
-              {step.source && (
-                <span className="text-xs text-slate-500 mt-1 block">
-                  来源: {step.source}
-                </span>
-              )}
-            </div>
-          ))}
-          
+        <div className="px-3 pb-3 pt-1">
+          <Markdown 
+            text={fullContent} 
+            className="text-sm text-slate-600 dark:text-slate-300/80 leading-relaxed prose prose-sm prose-slate dark:prose-invert max-w-none prose-p:my-1 prose-ul:my-1 prose-li:my-0.5"
+          />
           {isLoading && (
-            <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
-              <div className="w-2 h-2 bg-purple-500 dark:bg-purple-400 rounded-full animate-pulse" />
-              <span>正在推理...</span>
-            </div>
+            <span className="inline-block w-1.5 h-4 ml-0.5 bg-purple-400 dark:bg-purple-500 animate-pulse align-middle" />
           )}
         </div>
       )}
