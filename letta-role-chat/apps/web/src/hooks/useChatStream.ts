@@ -3,6 +3,7 @@ import { Role, Message } from "../types";
 import { api } from "../services/api";
 import useTTS from "../hooks/useTTS";
 import { previewText, stripAllFencedCodes } from "../utils/codeSegmentation";
+import { useAgentLoading } from "./useBackgroundLoading";
 
 /** 上传图片模型 */
 export interface UploadedImage {
@@ -94,7 +95,9 @@ export function useChatStream({
 }: UseChatStreamOptions) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  
+  // ✅ 使用全局 loading 状态管理，支持后台请求跟踪
+  const { isLoading, setLoading } = useAgentLoading(role.id);
 
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [textAttachments, setTextAttachments] = useState<TextAttachment[]>([]);
@@ -169,15 +172,22 @@ export function useChatStream({
     // ✅ 更新当前 roleId ref（用于消息隔离）
     currentRoleIdRef.current = role.id;
     
+    // ✅ 切换角色时立即清空消息
+    // 注意：不再重置 isLoading，因为现在使用全局状态管理
+    // 旧 agent 的请求会继续在后台完成，其 loading 状态由全局管理器跟踪
+    // 这样用户可以看到后台仍有请求在进行的提示
+    setMessages([]);
+    
     const loadHistory = async () => {
       try {
         const history = await api.getHistory(role.id);
-        if (mounted) setMessages(history);
+        if (mounted && currentRoleIdRef.current === role.id) {
+          setMessages(history);
+        }
       } catch (e) {
         console.error("Failed to load history:", e);
       }
     };
-    setMessages([]);
     loadHistory();
     return () => {
       mounted = false;
@@ -344,10 +354,10 @@ export function useChatStream({
   /** 取消流式（本实现通过 requestId 让后续 chunk 失效） */
   const cancelStream = useCallback(() => {
     activeRequestIdRef.current = "";
-    setIsLoading(false);
+    setLoading(false);
     stopSpeak();
     console.log("已停止生成");
-  }, [stopSpeak]);
+  }, [stopSpeak, setLoading]);
 
   /** 清空历史 */
   const clearHistory = useCallback(async () => {
@@ -404,7 +414,7 @@ export function useChatStream({
 
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
-    setIsLoading(true);
+    setLoading(true, "正在思考...");
     clearImages(); // 发送后立即清掉预览（并释放 objectURL）
     clearTextAttachments(); // 清空文本附件
 
@@ -429,7 +439,10 @@ export function useChatStream({
           
           // ✅ 消息隔离：如果已切换到其他 agent，不写入当前界面
           // 响应仍在后台继续，切换回来时会从历史加载
-          if (currentRoleIdRef.current !== requestRoleId) return;
+          if (currentRoleIdRef.current !== requestRoleId) {
+            console.log(`[Stream] 消息隔离: 响应属于 ${requestRoleId.slice(0,8)}，当前显示 ${currentRoleIdRef.current.slice(0,8)}`);
+            return;
+          }
 
           assistantContent += chunk;
           upsertAssistantMessage(assistantMsgId, assistantContent);
@@ -448,14 +461,17 @@ export function useChatStream({
         async () => {
           if (activeRequestIdRef.current !== requestId) return;
           
-          // ✅ 消息隔离：如果已切换到其他 agent，不更新当前界面状态
+          // ✅ 响应完成：无论是否切换了 agent，都清除该 agent 的 loading 状态
+          // 全局状态管理器会自动更新 UI
+          setLoading(false);
+          activeRequestIdRef.current = "";
+          
+          // 消息隔离：如果已切换到其他 agent，不更新当前界面的消息显示
           if (currentRoleIdRef.current !== requestRoleId) {
-            console.log(`[Stream] 响应完成但已切换 agent (${requestRoleId} -> ${currentRoleIdRef.current})`);
+            console.log(`[Stream] 响应完成但已切换 agent (${requestRoleId.slice(0,8)} -> ${currentRoleIdRef.current.slice(0,8)})`);
+            // 虽然不显示在当前界面，但 loading 状态已清除
             return;
           }
-
-          setIsLoading(false);
-          activeRequestIdRef.current = "";
 
           const brief = previewText(stripAllFencedCodes(assistantContent), 220);
           if (assistantContent.trim()) console.log("响应完成:", brief || "已完成");
@@ -468,7 +484,7 @@ export function useChatStream({
     } catch (e) {
       console.error("Chat error:", e);
       if (activeRequestIdRef.current === requestId) {
-        setIsLoading(false);
+        setLoading(false);
         activeRequestIdRef.current = "";
       }
       console.error("发送消息失败，请重试");
@@ -485,6 +501,7 @@ export function useChatStream({
     upsertAssistantMessage,
     clearImages,
     clearTextAttachments,
+    setLoading,
   ]);
 
   return {

@@ -6,11 +6,12 @@ import React, {
   useCallback,
 } from "react";
 import { Role } from "../types";
-import { Send, Loader2, Plus } from "lucide-react";
+import { Send, Loader2, Plus, Volume2, VolumeX, Square, ArrowUp, Info } from "lucide-react";
 import SelectionTTSButton from "./SelectionTTSButton";
 import MessageBubble from "./MessageBubble";
 import ComposerPreview from "./ComposerPreview";
 import { useChatStream, shouldConvertToAttachment } from "../hooks/useChatStream";
+import { useBackgroundLoading } from "../hooks/useBackgroundLoading";
 
 const cn = (...classes: Array<string | false | null | undefined>) =>
   classes.filter(Boolean).join(" ");
@@ -90,6 +91,9 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
       onAutoSpeakChange,
     });
 
+    // ✅ 获取后台 loading 状态
+    const { backgroundCount, hasBackgroundLoading } = useBackgroundLoading(role.id);
+
     const scrollRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -157,6 +161,16 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
 
     return (
       <div className={cn("flex h-full min-w-0 flex-col", className)}>
+        {/* ✅ 后台 loading 提示条：当其他 agent 正在思考时显示 */}
+        {hasBackgroundLoading && (
+          <div className="shrink-0 px-4 py-2 bg-blue-50 dark:bg-blue-900/30 border-b border-blue-100 dark:border-blue-800/50 flex items-center gap-2 text-sm text-blue-700 dark:text-blue-300">
+            <Loader2 size={14} className="animate-spin" />
+            <span>
+              {backgroundCount} 个其他 Agent 正在后台思考中，切换回去可查看响应
+            </span>
+          </div>
+        )}
+
         {showHeader && (
           <div className={cn("shrink-0 px-4 py-3", headerClassName)}>
             <div className="flex items-center justify-between gap-3">
@@ -166,26 +180,34 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
+                {/* 自动朗读按钮 */}
                 <button
                   type="button"
                   onClick={() => handleAutoSpeakChange(!autoSpeak)}
                   className={cn(
-                    "text-xs px-2 py-1 rounded-md ring-1 ring-current/20 transition",
-                    autoSpeak ? "bg-primary/10 opacity-100" : "opacity-60 hover:opacity-100"
+                    "p-2 rounded-full transition-colors",
+                    autoSpeak
+                      ? "bg-blue-500/20 text-blue-400 hover:bg-blue-500/30"
+                      : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
                   )}
-                  title="Auto Speak"
+                  title={autoSpeak ? "关闭自动朗读" : "开启自动朗读"}
+                  aria-label={autoSpeak ? "关闭自动朗读" : "开启自动朗读"}
                 >
-                  {autoSpeak ? "自动朗读:开" : "自动朗读:关"}
+                  {autoSpeak ? <Volume2 size={20} /> : <VolumeX size={20} />}
                 </button>
 
-                <button
-                  type="button"
-                  onClick={isLoading ? cancelStream : stopSpeak}
-                  className="text-xs px-2 py-1 rounded-md ring-1 ring-current/20 opacity-60 hover:opacity-100 transition"
-                  title={isLoading ? "Stop Generation" : "Stop Speaking"}
-                >
-                  {isLoading ? "停止生成" : "停止朗读"}
-                </button>
+                {/* 停止朗读按钮 - 仅在自动朗读开启时显示 */}
+                {autoSpeak && (
+                  <button
+                    type="button"
+                    onClick={stopSpeak}
+                    className="p-2 rounded-full text-slate-400 hover:bg-red-500/20 hover:text-red-400 transition-colors"
+                    title="停止朗读"
+                    aria-label="停止朗读"
+                  >
+                    <Square size={18} fill="currentColor" />
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -293,23 +315,24 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
                 style={{ height: "40px" }}
               />
 
+              {/* 发送按钮 */}
               <div className="pb-2">
                 <button
                   type="button"
                   onClick={send}
                   disabled={isLoading || (!input.trim() && uploadedImages.length === 0 && textAttachments.length === 0)}
                   className={cn(
-                    "p-2.5 rounded-full inline-flex items-center justify-center transition-all",
+                    "w-9 h-9 rounded-full inline-flex items-center justify-center transition-all",
                     "disabled:opacity-50 disabled:cursor-not-allowed",
-                    sendButtonClassName,
                     (!input.trim() && uploadedImages.length === 0 && textAttachments.length === 0) || isLoading
-                      ? "opacity-50"
-                      : "hover:scale-105"
+                      ? "bg-slate-700 text-slate-400"
+                      : "bg-blue-600 hover:bg-blue-500 text-white hover:scale-105",
+                    sendButtonClassName
                   )}
                   title="发送"
                   aria-label="发送消息"
                 >
-                  {isLoading ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
+                  {isLoading ? <Loader2 size={18} className="animate-spin" /> : <ArrowUp size={20} strokeWidth={2.5} />}
                 </button>
               </div>
             </div>

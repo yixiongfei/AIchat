@@ -45,6 +45,7 @@ export const initDb = async () => {
         role ENUM('user', 'assistant') NOT NULL,
         content TEXT NOT NULL,
         timestamp BIGINT,
+        images LONGTEXT,
         FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
       )
     `);

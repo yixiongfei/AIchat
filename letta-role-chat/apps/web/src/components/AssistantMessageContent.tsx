@@ -1,6 +1,6 @@
 
 // src/components/AssistantMessageContent.tsx
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo } from "react";
 import Markdown from "./Markdown";
 import CodeArtifactCard from "./CodeArtifactCard";
 import {
@@ -9,6 +9,26 @@ import {
     segmentMessageByCodeBlocks,
 } from "../utils/codeSegmentation";
 import { openArtifact } from "../utils/artifactBridge";
+
+// 使用全局 Set + localStorage 存储已打开的代码块 key，避免组件重新挂载时重复打开
+const OPENED_KEYS_STORAGE = "openedLongCodeKeys";
+const openedKeysGlobal: Set<string> = new Set(
+    JSON.parse(localStorage.getItem(OPENED_KEYS_STORAGE) || "[]")
+);
+
+function markKeyAsOpened(key: string) {
+    if (openedKeysGlobal.has(key)) return false;
+    openedKeysGlobal.add(key);
+    // 限制存储数量，避免无限增长（保留最近 500 个）
+    if (openedKeysGlobal.size > 500) {
+        const arr = Array.from(openedKeysGlobal);
+        arr.splice(0, arr.length - 500);
+        openedKeysGlobal.clear();
+        arr.forEach((k) => openedKeysGlobal.add(k));
+    }
+    localStorage.setItem(OPENED_KEYS_STORAGE, JSON.stringify(Array.from(openedKeysGlobal)));
+    return true;
+}
 
 export default function AssistantMessageContent(props: {
     msgId: string;
@@ -23,18 +43,14 @@ export default function AssistantMessageContent(props: {
         [text]
     );
 
-    // 避免流式渲染过程中重复弹出
-    const openedRef = useRef<Set<string>>(new Set());
-
     useEffect(() => {
         if (!autoOpenLongCode) return;
 
         for (const seg of segments) {
             if (seg.type !== "longCode") continue;
             const key = `${msgId}#${seg.block.index}`;
-            if (openedRef.current.has(key)) continue;
+            if (!markKeyAsOpened(key)) continue; // 已打开过，跳过
 
-            openedRef.current.add(key);
             openArtifact(`${roleName}-code-${seg.block.index}`, seg.block.language, seg.block.code);
         }
     }, [segments, msgId, roleName, autoOpenLongCode]);

@@ -1,7 +1,8 @@
 
 import React, { useState } from 'react';
 import { Role } from '../types';
-import { UserCircle, Plus } from 'lucide-react';
+import { UserCircle, Plus, Loader2 } from 'lucide-react';
+import { useBackgroundLoading } from '../hooks/useBackgroundLoading';
 
 interface RoleListProps {
   roles: Role[];
@@ -19,6 +20,11 @@ export const RoleList: React.FC<RoleListProps> = ({
   onEditRole,
 }) => {
   const [failedAvatars, setFailedAvatars] = useState<Record<string, boolean>>({});
+  
+  // ✅ 获取所有正在 loading 的 agent，用于在列表中显示思考指示器
+  const { allLoadingAgentIds } = useBackgroundLoading(selectedRoleId);
+  const loadingSet = new Set(allLoadingAgentIds);
+  
   return (
     <div className="h-full flex flex-col bg-slate-50 text-slate-900 dark:bg-slate-900/40 dark:text-slate-100">
       {/* Header */}
@@ -41,6 +47,7 @@ export const RoleList: React.FC<RoleListProps> = ({
       <div className="flex-1  py-2">
         {roles.map((role) => {
           const active = selectedRoleId === role.id;
+          const isThinking = loadingSet.has(role.id);
 
           return (
             <div key={role.id} className="w-full flex items-center justify-between">
@@ -53,7 +60,7 @@ export const RoleList: React.FC<RoleListProps> = ({
                 ].join(' ')}
               >
                 {/* Icon / Avatar */}
-                <div className="shrink-0">
+                <div className="shrink-0 relative">
                   {role.avatar && !failedAvatars[role.id] ? (
                     <img
                       src={role.avatar}
@@ -63,6 +70,12 @@ export const RoleList: React.FC<RoleListProps> = ({
                     />
                   ) : (
                     <UserCircle size={34} className={['text-slate-400'].join(' ')} />
+                  )}
+                  {/* ✅ 后台 loading 指示器 - 显示在头像右下角 */}
+                  {isThinking && (
+                    <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-blue-500 rounded-full flex items-center justify-center ring-2 ring-white dark:ring-slate-900">
+                      <Loader2 size={10} className="animate-spin text-white" />
+                    </div>
                   )}
                 </div>
 
@@ -74,6 +87,12 @@ export const RoleList: React.FC<RoleListProps> = ({
                     ].join(' ')}
                   >
                     {role.name}
+                    {/* ✅ 思考中文字提示 */}
+                    {isThinking && (
+                      <span className="ml-2 text-xs font-normal text-blue-500 dark:text-blue-400">
+                        思考中...
+                      </span>
+                    )}
                   </p>
                 </div>
               </button>

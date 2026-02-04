@@ -284,12 +284,15 @@ export const messageService = {
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
 
-    // 1. 保存用户消息到数据库（包含图片信息）
+    // 1. 保存用户消息到数据库（不保存图片 base64，太大了）
+    // 图片仍会发送给 Letta API，但不持久化到本地数据库
     const userMsgId = uuidv4();
-    const imagesJson = images && images.length > 0 ? JSON.stringify(images) : null;
+    const hasImages = images && images.length > 0;
+    // 只记录是否有图片，不保存实际内容
+    const imageNote = hasImages ? `[包含 ${images.length} 张图片]` : null;
     await pool.query(
       'INSERT INTO messages (id, agent_id, role, content, timestamp, images) VALUES (?, ?, ?, ?, ?, ?)',
-      [userMsgId, roleId, 'user', text, Date.now(), imagesJson]
+      [userMsgId, roleId, 'user', text + (imageNote ? `\n${imageNote}` : ''), Date.now(), null]
     );
 
     try {
