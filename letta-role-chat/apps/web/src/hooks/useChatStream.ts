@@ -128,9 +128,10 @@ export function useChatStream({
   // 这里提供取消能力：用 requestId 让旧请求 chunk 自动失效
   const activeRequestIdRef = useRef<string>("");
   
-  // ✅ 跟踪当前显示的 roleId，用于消息隔离
-  // 当切换 agent 时，旧 agent 的流式响应不会写入新 agent 的界面
+  // ✅ 跟踪当前显示的 roleId 和 chatId，用于消息隔离
+  // 当切换 agent 或 chat 时，旧的流式响应不会写入新的界面
   const currentRoleIdRef = useRef<string>(role.id);
+  const currentChatIdRef = useRef<string | undefined>(chatId);
 
   const { appendStream, flushStream, stop: stopSpeak } = useTTS({
     voice: role?.voice,
@@ -181,8 +182,9 @@ export function useChatStream({
   useEffect(() => {
     let mounted = true;
     
-    // ✅ 更新当前 roleId ref（用于消息隔离）
+    // ✅ 更新当前 roleId 和 chatId ref（用于消息隔离）
     currentRoleIdRef.current = role.id;
+    currentChatIdRef.current = chatId;
     
     // ✅ 切换角色或 chat 时立即清空旧消息并显示加载状态
     setMessages([]);
@@ -198,14 +200,15 @@ export function useChatStream({
           history = await api.getHistory(role.id);
         }
         
-        if (mounted && currentRoleIdRef.current === role.id) {
+        // ✅ 检查 roleId 和 chatId 都匹配才更新
+        if (mounted && currentRoleIdRef.current === role.id && currentChatIdRef.current === chatId) {
           // ✅ 加载完成后再更新消息
           setMessages(history);
           setIsLoadingHistory(false);
         }
       } catch (e) {
         console.error("Failed to load history:", e);
-        if (mounted && currentRoleIdRef.current === role.id) {
+        if (mounted && currentRoleIdRef.current === role.id && currentChatIdRef.current === chatId) {
           setMessages([]);
           setIsLoadingHistory(false);
         }
@@ -450,11 +453,17 @@ export function useChatStream({
     const requestId = "req-" + Date.now();
     activeRequestIdRef.current = requestId;
     
-    // ✅ 记录发起请求时的 roleId，用于消息隔离
+    // ✅ 记录发起请求时的 roleId 和 chatId，用于消息隔离
     const requestRoleId = role.id;
+    const requestChatId = chatId;
 
     const assistantMsgId = "assistant-" + Date.now();
     let assistantContent = "";
+    
+    // ✅ 检查是否应该隔离消息（切换了 agent 或 chat）
+    const shouldIsolate = () => {
+      return currentRoleIdRef.current !== requestRoleId || currentChatIdRef.current !== requestChatId;
+    };
 
     try {
       await api.sendMessageStream(
@@ -464,10 +473,10 @@ export function useChatStream({
           // 如果已取消或被新请求替换，忽略
           if (activeRequestIdRef.current !== requestId) return;
           
-          // ✅ 消息隔离：如果已切换到其他 agent，不写入当前界面
+          // ✅ 消息隔离：如果已切换到其他 agent 或 chat，不写入当前界面
           // 响应仍在后台继续，切换回来时会从历史加载
-          if (currentRoleIdRef.current !== requestRoleId) {
-            console.log(`[Stream] 消息隔离: 响应属于 ${requestRoleId.slice(0,8)}，当前显示 ${currentRoleIdRef.current.slice(0,8)}`);
+          if (shouldIsolate()) {
+            console.log(`[Stream] 消息隔离: 响应属于 ${requestRoleId.slice(0,8)}/${requestChatId?.slice(0,8) || 'default'}，当前显示 ${currentRoleIdRef.current.slice(0,8)}/${currentChatIdRef.current?.slice(0,8) || 'default'}`);
             return;
           }
 
@@ -488,7 +497,7 @@ export function useChatStream({
         async () => {
           if (activeRequestIdRef.current !== requestId) return;
           
-          // ✅ 响应完成：无论是否切换了 agent，都清除该 agent 的 loading 状态
+          // ✅ 响应完成：无论是否切换了 agent/chat，都清除该 agent 的 loading 状态
           // 全局状态管理器会自动更新 UI
           setLoading(false);
           setIsReasoning(false);
@@ -497,9 +506,9 @@ export function useChatStream({
           // ✅ 通知外部刷新 Chat 列表
           onMessageSent?.();
           
-          // 消息隔离：如果已切换到其他 agent，不更新当前界面的消息显示
-          if (currentRoleIdRef.current !== requestRoleId) {
-            console.log(`[Stream] 响应完成但已切换 agent (${requestRoleId.slice(0,8)} -> ${currentRoleIdRef.current.slice(0,8)})`);
+          // 消息隔离：如果已切换到其他 agent 或 chat，不更新当前界面的消息显示
+          if (shouldIsolate()) {
+            console.log(`[Stream] 响应完成但已切换 (${requestRoleId.slice(0,8)}/${requestChatId?.slice(0,8) || 'default'} -> ${currentRoleIdRef.current.slice(0,8)}/${currentChatIdRef.current?.slice(0,8) || 'default'})`);
             // 虽然不显示在当前界面，但 loading 状态已清除
             return;
           }
@@ -514,7 +523,7 @@ export function useChatStream({
         // ✅ 推理回调
         (step) => {
           if (activeRequestIdRef.current !== requestId) return;
-          if (currentRoleIdRef.current !== requestRoleId) return;
+          if (shouldIsolate()) return;
           
           setReasoningSteps((prev) => [...prev, step]);
         },

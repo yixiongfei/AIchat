@@ -218,16 +218,7 @@ router.delete("/:chatId", async (req, res) => {
 
     const lettaConversationId = chatRows[0].letta_conversation_id;
 
-    // 如果有 Letta conversation，先删除云端的
-    if (lettaConversationId) {
-      try {
-        await lettaClient.conversations.cancel(lettaConversationId);
-        console.log(`Cancelled Letta conversation: ${lettaConversationId}`);
-      } catch (lettaError) {
-        // 即使 Letta API 失败，仍然继续删除本地记录
-        console.error("Failed to delete Letta conversation:", lettaError);
-      }
-    }
+    // 如果有 Letta conversation，当前不执行远程 cancel（可能返回 409）
 
     // 删除聊天中的所有消息
     await pool.query(`DELETE FROM messages WHERE chat_id = ?`, [chatId]);

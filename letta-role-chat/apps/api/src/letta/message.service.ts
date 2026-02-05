@@ -236,7 +236,6 @@ export const messageService = {
     let assistantContent = "";
 
     try {
-      console.log(`[Stream] Starting streaming for agent ${agentId}${lettaConversationId ? `, conversation: ${lettaConversationId}` : ''}...`);
 
       let stream: AsyncIterable<any>;
 
@@ -247,6 +246,7 @@ export const messageService = {
           input: wrapUserInput(text),
           stream_tokens: DEFAULT_STRATEGY.streamTokens,
           include_pings: DEFAULT_STRATEGY.includePings,
+          streaming: true,  // ✅ 添加 streaming: true，否则不会返回流式响应
         });
       } else {
         // 使用传统的 agent API（向后兼容）
@@ -261,68 +261,131 @@ export const messageService = {
       // 通知前端开始流式
       res.write(`data: ${JSON.stringify({ type: "stream_started" })}\n\n`);
 
-      // ✅ 处理流式响应
-      for await (const chunk of stream) {
-        // 新版 SDK 使用 message_type（下划线格式）
-        const messageType = (chunk as any).message_type || (chunk as any).messageType;
-
-        // 跳过 ping 消息
-        if (messageType === "ping") {
-          continue;
+      const extractText = (content: any) => {
+        if (!content) return "";
+        if (typeof content === "string") return content;
+        if (Array.isArray(content)) {
+          return content
+            .filter((part: any) => part?.type === "text")
+            .map((part: any) => part.text)
+            .join("");
         }
+        return "";
+      };
 
-        // 处理停止原因
+      const writeAssistantContent = (content: string) => {
+        if (!content) return;
+        assistantContent += content;
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`);
+      };
+
+      const handleChunk = (chunk: any) => {
+        const messageType = chunk?.message_type || chunk?.messageType || chunk?.type;
+
+        // 跳过 ping / 停止原因 / 统计
+        if (messageType === "ping") return;
         if (messageType === "stop_reason") {
-          console.log(`[Stream] Stop reason: ${(chunk as any).stop_reason || (chunk as any).stopReason}`);
-          continue;
+          return;
         }
-
-        // 处理使用统计
         if (messageType === "usage_statistics") {
           console.log(`[Stream] Usage:`, chunk);
-          continue;
+          return;
         }
 
-        // ✅ 处理 assistant 消息
-        if (messageType === "assistant_message") {
-          let content = "";
-          
-          if (typeof chunk.content === "string") {
-            content = chunk.content;
-          } else if (Array.isArray(chunk.content)) {
-            content = chunk.content
-              .filter((part: any) => part.type === "text")
-              .map((part: any) => part.text)
-              .join("");
-          }
-
-          if (content) {
-            assistantContent += content;
-            // 以 SSE 格式发送内容
-            res.write(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`);
-          }
+        // ✅ assistant 消息（多种形态兼容）
+        if (
+          messageType === "assistant_message" ||
+          messageType === "assistant_message_delta" ||
+          messageType === "assistant_message_chunk"
+        ) {
+          const deltaContent = chunk?.delta?.content;
+          const content = typeof deltaContent === "string" ? deltaContent : extractText(chunk?.content);
+          writeAssistantContent(content);
+          return;
         }
 
-        // ✅ 处理推理消息（reasoning_message）
+        // ✅ token 级别流式
+        if (messageType === "text_stream_token") {
+          const tokenContent = chunk?.token || "";
+          writeAssistantContent(tokenContent);
+          return;
+        }
+
+        // ✅ 推理消息
         if (messageType === "reasoning_message") {
-          const reasoningContent = (chunk as any).reasoning || "";
+          const reasoningContent = chunk?.reasoning || "";
           if (reasoningContent) {
-            res.write(`data: ${JSON.stringify({ 
-              type: "reasoning", 
-              content: reasoningContent,
-              source: (chunk as any).source || "unknown"
-            })}\n\n`);
+            res.write(
+              `data: ${JSON.stringify({
+                type: "reasoning",
+                content: reasoningContent,
+                source: chunk?.source || "unknown",
+              })}\n\n`
+            );
           }
+          return;
         }
 
-        // 处理工具调用消息（可选：通知前端正在思考）
+        // ✅ 工具调用消息
         if (messageType === "tool_call_message") {
-          const toolCall = (chunk as any).tool_call || (chunk as any).toolCall;
+          const toolCall = chunk?.tool_call || chunk?.toolCall;
           res.write(`data: ${JSON.stringify({ type: "thinking", tool: toolCall?.name })}\n\n`);
+          return;
+        }
+
+        // ✅ 工具返回消息（部分模型会把最终文本放在这里）
+        if (messageType === "tool_return_message") {
+          const toolReturn =
+            chunk?.tool_return ||
+            chunk?.toolReturn ||
+            chunk?.return ||
+            chunk?.result ||
+            chunk?.output ||
+            chunk?.data;
+
+          const toolContent =
+            (typeof toolReturn === "string" ? toolReturn : "") ||
+            (typeof toolReturn?.content === "string" ? toolReturn.content : "") ||
+            extractText(toolReturn?.content) ||
+            (typeof chunk?.content === "string" ? chunk.content : "") ||
+            extractText(chunk?.content) ||
+            "";
+
+          if (toolContent) {
+            writeAssistantContent(toolContent);
+          }
+          return;
+        }
+
+        // ✅ 兜底：尝试从通用字段提取内容
+        const fallbackContent =
+          chunk?.choices?.[0]?.delta?.content ||
+          chunk?.content ||
+          chunk?.text ||
+          "";
+        if (typeof fallbackContent === "string" && fallbackContent) {
+          writeAssistantContent(fallbackContent);
+        }
+      };
+
+      const isAsyncIterable =
+        stream && typeof (stream as any)[Symbol.asyncIterator] === "function";
+
+      // ✅ 检查是否返回的是非流式结果（数组 / 单对象）
+      if (Array.isArray(stream)) {
+        for (const msg of stream) {
+          const messageType = (msg as any).message_type || (msg as any).messageType || (msg as any).type;
+          handleChunk(msg);
+        }
+      } else if (!isAsyncIterable) {
+        handleChunk(stream);
+      } else {
+        // ✅ 处理流式响应（AsyncIterable）
+        for await (const chunk of stream as AsyncIterable<any>) {
+          const messageType = (chunk as any).message_type || (chunk as any).messageType || (chunk as any).type;
+          handleChunk(chunk);
         }
       }
-
-      console.log(`[Stream] Completed, content length: ${assistantContent.length}`);
 
     } catch (error: any) {
       console.error("[Stream] Error:", error);
@@ -506,6 +569,9 @@ export const messageService = {
     if (chatId) {
       query += ' AND chat_id = ?';
       params.push(chatId);
+    } else {
+      // 默认历史只显示未绑定 chat 的消息，避免跨 chat 混入
+      query += ' AND chat_id IS NULL';
     }
     
     query += ' ORDER BY timestamp ASC';
