@@ -54,15 +54,17 @@ export default function CodeArtifactItem({
 }: CodeArtifactItemProps) {
   const { icon, typeLabel } = getFileInfo(artifact.language);
   const lines = artifact.code ? artifact.code.split("\n").length : 0;
+  const preview = artifact.code
+    ? artifact.code.split("\n").find((line) => line.trim().length > 0) || "(空内容)"
+    : "(空内容)";
 
   return (
     <div
       className={[
         "group flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-all",
-        "hover:bg-slate-800/60",
         isActive
-          ? "bg-slate-800/80 ring-1 ring-blue-500/50"
-          : "bg-slate-800/30",
+          ? "bg-blue-50/70 text-blue-700 ring-1 ring-blue-400/40 dark:bg-slate-800/80 dark:text-slate-100 dark:ring-blue-500/50"
+          : "bg-slate-100/70 text-slate-700 hover:bg-slate-200/70 dark:bg-slate-800/40 dark:text-slate-200 dark:hover:bg-slate-800/70",
       ].join(" ")}
       onClick={onClick}
       role="button"
@@ -72,17 +74,18 @@ export default function CodeArtifactItem({
       }}
     >
       {/* 图标区域 */}
-      <div className="shrink-0 w-10 h-10 rounded-lg bg-slate-700/50 flex items-center justify-center">
+      <div className="shrink-0 w-10 h-10 rounded-lg bg-slate-200 dark:bg-slate-700/50 flex items-center justify-center">
         {icon}
       </div>
 
       {/* 内容区域 */}
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-slate-200 truncate">
-          {artifact.title}
-        </div>
-        <div className="text-xs text-slate-500 truncate">
+        <div className="text-sm font-medium truncate">{artifact.title}</div>
+        <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
           {typeLabel} · {lines} 行
+        </div>
+        <div className="text-xs text-slate-400 dark:text-slate-500 truncate" title={preview}>
+          {preview}
         </div>
       </div>
 
@@ -93,7 +96,7 @@ export default function CodeArtifactItem({
           e.stopPropagation();
           onRemove();
         }}
-        className="shrink-0 p-1.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition-all"
+        className="shrink-0 p-1.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-red-100 text-slate-400 hover:text-red-500 transition-all dark:hover:bg-red-500/20"
         title="删除"
         aria-label="删除代码块"
       >

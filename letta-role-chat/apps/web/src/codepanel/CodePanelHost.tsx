@@ -23,9 +23,10 @@ export default function CodePanelHost() {
       const detail = ce.detail;
       if (detail?.code) {
         addArtifact({
-          title: detail.title || "Code",
+          title: detail.title,
           language: (detail.language || "text").toLowerCase(),
           code: detail.code,
+          agentName: detail.agentName,
         });
       }
     };

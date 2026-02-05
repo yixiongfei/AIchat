@@ -29,7 +29,7 @@ type CodePanelAPI = CodePanelState & {
   togglePanel: () => void;
   setWidth: (w: number) => void;
   // ✅ 新增多代码块管理
-  addArtifact: (artifact: Omit<CodeArtifact, "id" | "timestamp">) => void;
+  addArtifact: (artifact: { title?: string; language?: string; code: string; id?: string; agentName?: string }) => void;
   removeArtifact: (id: string) => void;
   setActiveArtifact: (id: string) => void;
   toggleCollapsed: (id: string) => void;
@@ -42,7 +42,102 @@ const WIDTH_KEY = "artifactWidth";
 const OPEN_KEY = "artifactPanelOpen";
 
 // 生成唯一 ID
-const generateId = () => `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const LANGUAGE_EXTENSION_MAP: Record<string, string> = {
+  typescript: "ts",
+  ts: "ts",
+  javascript: "js",
+  js: "js",
+  jsx: "jsx",
+  tsx: "tsx",
+  python: "py",
+  py: "py",
+  java: "java",
+  c: "c",
+  cpp: "cpp",
+  csharp: "cs",
+  cs: "cs",
+  go: "go",
+  rust: "rs",
+  ruby: "rb",
+  php: "php",
+  swift: "swift",
+  kotlin: "kt",
+  html: "html",
+  css: "css",
+  scss: "scss",
+  less: "less",
+  sql: "sql",
+  shell: "sh",
+  bash: "sh",
+  json: "json",
+  yaml: "yml",
+  yml: "yml",
+  xml: "xml",
+  graphql: "graphql",
+  markdown: "md",
+  md: "md",
+  txt: "txt",
+  text: "txt",
+};
+
+const shortHash = (input: string) => {
+  let hash = 0;
+  if (input.length === 0) return "000000";
+  for (let i = 0; i < input.length; i += 1) {
+    const chr = input.charCodeAt(i);
+    hash = (hash << 5) - hash + chr;
+    hash |= 0; // Convert to 32bit integer
+  }
+  return Math.abs(hash).toString(36).slice(0, 6).padStart(6, "0");
+};
+
+const inferExtension = (language: string) => LANGUAGE_EXTENSION_MAP[language] || language || "txt";
+
+const buildStableId = (language: string, code: string) => `artifact-${inferExtension(language)}-${shortHash(`${language}::${code}`)}`;
+
+/**
+ * 从代码内容中提取 title/文件名，并返回提取的 title 和移除 title 行后的代码
+ * 支持多种格式：
+ * - (title: filename.py)
+ * - # title: filename.py
+ * - // title: filename.py
+ * - 块注释格式
+ * 
+ * @returns { title: string | null, cleanedCode: string }
+ */
+const extractTitleFromContent = (code: string): { title: string | null; cleanedCode: string } => {
+  // 只检查代码的前 500 个字符（title 通常在开头）
+  const header = code.slice(0, 500);
+  
+  // 按优先级尝试多种模式
+  const patterns = [
+    // (title: filename.ext) - 带括号格式
+    /\(\s*title\s*:\s*([^)\n]+?)\s*\)/i,
+    // # title: filename.ext 或 // title: filename.ext 或 -- title: filename.ext
+    /(?:^|[\n\r])[ \t]*(?:#|\/\/|--|;)\s*title\s*:\s*([^\n\r]+)/i,
+    // /* title: filename.ext */ 或 /** title: filename.ext */
+    /\/\*+\s*title\s*:\s*([^*\n]+?)\s*\*+\//i,
+    // title: filename.ext（独立行）
+    /(?:^|[\n\r])[ \t]*title\s*:\s*([^\n\r]+)/i,
+    // filename: xxx.ext 或 File: xxx.ext
+    /(?:^|[\n\r])[ \t]*(?:filename|file)\s*:\s*([^\n\r]+)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = pattern.exec(header);
+    if (match?.[1]) {
+      const extracted = match[1].trim();
+      // 清理可能的尾部注释符号
+      const cleaned = extracted.replace(/\s*(?:\*\/|-->|#|\/\/)?\s*$/, "").trim();
+      if (cleaned.length > 0 && cleaned.length < 100) {
+        // 移除匹配到的 title 行
+        const cleanedCode = code.replace(match[0], "").replace(/^\n+/, "");
+        return { title: cleaned, cleanedCode };
+      }
+    }
+  }
+  return { title: null, cleanedCode: code };
+};
 
 export function CodePanelProvider({ children }: { children: React.ReactNode }) {
   // ✅ 从 localStorage 读取打开/关闭状态，默认关闭
@@ -84,24 +179,49 @@ export function CodePanelProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // ✅ 添加代码块（自动展开新增的，折叠其他的）
-  const addArtifact = useCallback((artifact: Omit<CodeArtifact, "id" | "timestamp">) => {
-    const newId = generateId();
-    const newArtifact: CodeArtifact = {
-      ...artifact,
-      id: newId,
-      timestamp: Date.now(),
-    };
-    
-    setArtifacts((prev) => [...prev, newArtifact]);
-    setActiveId(newId);
-    // 新代码块默认展开，其他折叠
-    setCollapsedMap((prev) => {
-      const next = { ...prev };
-      Object.keys(next).forEach((k) => (next[k] = true));
-      next[newId] = false;
-      return next;
+  const addArtifact = useCallback((artifact: { title?: string; language?: string; code: string; id?: string; agentName?: string }) => {
+    const language = (artifact.language || "text").toLowerCase();
+    const code = artifact.code || "";
+    const stableId = artifact.id || buildStableId(language, code);
+    const agentName = artifact.agentName || "Agent";
+
+    setArtifacts((prev) => {
+      if (prev.some((a) => a.id === stableId)) {
+        setActiveId(stableId);
+        setCollapsedMap((map) => {
+          const next = { ...map };
+          Object.keys(next).forEach((k) => (next[k] = true));
+          next[stableId] = false;
+          return next;
+        });
+        setOpen(true);
+        return prev;
+      }
+
+      // 优先从代码内容中提取 title: xxx 格式的文件名，并清理 title 行
+      const { title: extracted, cleanedCode } = extractTitleFromContent(code);
+      // 如果没有提取到，使用默认的 agentName-code-N 格式
+      const defaultName = `${agentName}-code-${prev.length + 1}`;
+      const title = extracted || defaultName;
+
+      const newArtifact: CodeArtifact = {
+        id: stableId,
+        title,
+        language,
+        code: cleanedCode, // 使用清理后的代码
+        timestamp: Date.now(),
+      };
+
+      setActiveId(stableId);
+      setCollapsedMap((map) => {
+        const next = { ...map };
+        Object.keys(next).forEach((k) => (next[k] = true));
+        next[stableId] = false;
+        return next;
+      });
+      setOpen(true);
+      return [...prev, newArtifact];
     });
-    setOpen(true);
   }, [setOpen]);
 
   // ✅ 删除代码块
@@ -143,11 +263,12 @@ export function CodePanelProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // ✅ 兼容旧 API：openPanel 现在会添加到列表
-  const openPanel = useCallback((payload: { title?: string; language?: string; code?: string }) => {
+  const openPanel = useCallback((payload: { title?: string; language?: string; code?: string; agentName?: string }) => {
     addArtifact({
-      title: payload.title || "Code",
-      language: payload.language || "text",
+      title: payload.title,
+      language: payload.language,
       code: payload.code || "",
+      agentName: payload.agentName,
     });
   }, [addArtifact]);
 

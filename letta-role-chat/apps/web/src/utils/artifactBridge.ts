@@ -1,14 +1,17 @@
 // src/utils/artifactBridge.ts
 export type OpenArtifactDetail = {
-  title: string;
+  title?: string;
   language: string;
   code: string;
+  agentName?: string;
 };
 
-export function openArtifact(title: string, language: string, code: string) {
+export function openArtifact(agentName: string, language: string, code: string) {
+  // 不传 title，让 CodePanelProvider 自动从代码内容中提取 title: xxx 格式
+  // 如果提取不到，会使用 agentName-code-N 格式
   window.dispatchEvent(
     new CustomEvent<OpenArtifactDetail>("open-artifact", {
-      detail: { title, language, code },
+      detail: { language, code, agentName },
     })
   );
 }

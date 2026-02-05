@@ -51,7 +51,8 @@ export default function AssistantMessageContent(props: {
             const key = `${msgId}#${seg.block.index}`;
             if (!markKeyAsOpened(key)) continue; // 已打开过，跳过
 
-            openArtifact(`${roleName}-code-${seg.block.index}`, seg.block.language, seg.block.code);
+            // 传递 agentName，让 CodePanelProvider 自动从代码中提取 title
+            openArtifact(roleName, seg.block.language, seg.block.code);
         }
     }, [segments, msgId, roleName, autoOpenLongCode]);
 
@@ -86,7 +87,7 @@ export default function AssistantMessageContent(props: {
                         language={b.language}
                         lines={b.lines}
                         chars={b.chars}
-                        onOpen={() => openArtifact(`${roleName}-code-${b.index}`, b.language, b.code)}
+                        onOpen={() => openArtifact(roleName, b.language, b.code)}
                     />
                 );
             })}

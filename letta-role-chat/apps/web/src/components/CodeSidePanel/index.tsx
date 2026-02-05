@@ -111,9 +111,10 @@ export function CodeSidePanel({
     <aside
       className={[
         "fixed top-0 right-0 z-50 h-screen",
-        "bg-slate-950 border-l border-white/10",
         "transition-transform duration-200 ease-out",
-        "flex flex-col",
+        "flex flex-col backdrop-blur",
+        "bg-white/95 border-l border-slate-200/70 text-slate-900",
+        "dark:bg-slate-950/95 dark:border-white/10 dark:text-slate-50",
         open ? "translate-x-0 pointer-events-auto" : "translate-x-full pointer-events-none",
       ].join(" ")}
       style={{ width }}
@@ -124,7 +125,7 @@ export function CodeSidePanel({
     >
       {/* 拖拽条 */}
       <div
-        className="absolute left-0 top-0 h-full w-1 cursor-col-resize hover:bg-blue-500/30 z-10"
+        className="absolute left-0 top-0 h-full w-1 cursor-col-resize hover:bg-blue-500/30 dark:hover:bg-blue-400/30 z-10"
         onMouseDown={() => {
           draggingRef.current = true;
           document.body.style.cursor = "col-resize";
@@ -135,18 +136,18 @@ export function CodeSidePanel({
 
       {/* 顶部标题栏 - 只在列表视图显示 */}
       {!selectedArtifact && (
-        <div className="shrink-0 h-12 px-4 flex items-center justify-between bg-slate-950/80 backdrop-blur border-b border-white/10">
-          <div className="flex items-center gap-2 text-slate-100">
+        <div className="shrink-0 h-12 px-4 flex items-center justify-between bg-white/80 dark:bg-slate-950/80 border-b border-slate-200/70 dark:border-white/10">
+          <div className="flex items-center gap-2 text-slate-700 dark:text-slate-100">
             <span className="font-semibold">代码块</span>
             {artifacts.length > 0 && (
-              <span className="text-xs text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded">
+              <span className="text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
                 {artifacts.length}
               </span>
             )}
           </div>
           <button
             onClick={onClose}
-            className="rounded-md px-2 py-1 text-sm text-slate-200 hover:bg-slate-800 border border-transparent transition"
+            className="rounded-md px-2 py-1 text-sm text-slate-500 hover:bg-slate-200/80 border border-transparent transition dark:text-slate-200 dark:hover:bg-slate-800"
             aria-label="关闭"
           >
             ✕
