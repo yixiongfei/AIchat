@@ -14,14 +14,20 @@ exports.agentService = {
     // ✅ 新增 pruneDeleted: 同步成功后是否清理本地已不存在于云端的记录（默认 true）
     async syncFromCloud(pruneDeleted = true) {
         try {
-            // 1) 拉取云端列表（当前存在的 agent）
-            const cloudAgents = (await client_1.lettaClient.agents.list()); // Letta SDK 支持 list() 获取 agents [1](https://deepwiki.com/letta-ai/letta/10.2-typescript-sdk)[2](https://docs.letta.com/api/typescript)
+            // 1) 拉取云端列表（新版 SDK 返回分页对象，需要迭代）
+            const agentsPage = await client_1.lettaClient.agents.list();
+            const cloudAgents = [];
+            for await (const agent of agentsPage) {
+                cloudAgents.push(agent);
+            }
             // 2) 预先构建云端 id 集合（用于 prune）
             const cloudIdSet = new Set(cloudAgents.map(a => a.id));
             // 3) Upsert：逐个写入本地
             for (const agent of cloudAgents) {
-                const persona = agent.memoryBlocks?.find((b) => b.label === "persona")?.value ?? "";
-                const human = agent.memoryBlocks?.find((b) => b.label === "human")?.value ?? "";
+                // 新版 SDK 使用 memory_blocks，兼容旧版 memoryBlocks
+                const memoryBlocks = agent.memory_blocks || agent.memoryBlocks || [];
+                const persona = memoryBlocks.find((b) => b.label === "persona")?.value ?? "";
+                const human = memoryBlocks.find((b) => b.label === "human")?.value ?? "";
                 const [rows] = await db_1.default.query("SELECT id FROM agents WHERE agent_id = ?", [agent.id]);
                 if (rows.length === 0) {
                     await db_1.default.query("INSERT INTO agents (id, name, persona, human, agent_id, created_at) VALUES (?, ?, ?, ?, ?, ?)", [(0, uuid_1.v4)(), agent.name, persona, human, agent.id, Date.now()]);
@@ -61,9 +67,10 @@ exports.agentService = {
         }
     },
     async createRole(name, persona, human, voice, speed, pitch, style, avatarBase64) {
+        // 新版 SDK 使用下划线格式的参数名
         const agent = await client_1.lettaClient.agents.create({
             name,
-            memoryBlocks: [
+            memory_blocks: [
                 { label: "persona", value: persona },
                 { label: "human", value: human },
             ],

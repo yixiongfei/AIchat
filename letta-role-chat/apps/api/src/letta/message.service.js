@@ -30,7 +30,6 @@ function parseBase64Image(dataUri) {
     }
     return null;
 }
-// ✅ 构建 Letta 官方多模态消息格式
 function buildMessageContent(text, images) {
     // 如果没有图片，返回包装后的纯文本
     if (!images || images.length === 0) {
@@ -53,12 +52,13 @@ function buildMessageContent(text, images) {
                 type: "image",
                 source: {
                     type: "base64",
-                    mediaType: parsed.mediaType, // ✅ 使用 camelCase（Letta SDK 要求）
+                    media_type: parsed.mediaType, // ✅ Letta SDK 使用下划线格式 media_type
                     data: parsed.data
                 }
             });
         }
     }
+    console.log(`[buildMessageContent] Built multimodal content with ${content.length} parts (text: ${text ? 1 : 0}, images: ${images.length})`);
     return content;
 }
 // ✅ 延时函数
@@ -280,14 +280,13 @@ exports.messageService = {
             await db_1.default.query('UPDATE chats SET updated_at = ? WHERE id = ?', [Date.now(), chatId]);
         }
         try {
-            // ✅ 构建 Letta 官方多模态消息内容
+            // ✅ 构建 Letta 消息内容（现在总是返回字符串）
             const messageContent = buildMessageContent(text, images);
             // ✅ 使用异步 API 创建后台任务
             console.log(`[Async] Creating async message for agent ${agentId}${lettaConversationId ? `, conversation: ${lettaConversationId}` : ''}...`);
-            // 新版 SDK 使用不同的参数名（下划线格式）
+            // Letta API 的 input 参数接受字符串
             const run = await client_1.lettaClient.agents.messages.createAsync(agentId, {
-                input: typeof messageContent === 'string' ? messageContent : undefined,
-                messages: typeof messageContent !== 'string' ? [{ role: "user", content: messageContent }] : undefined,
+                input: messageContent,
             });
             const runId = run.id;
             if (!runId) {
@@ -403,6 +402,24 @@ exports.messageService = {
     },
     async deleteHistory(agentId) {
         try {
+            // 1. 先从数据库获取对应的 Letta agent_id
+            const [agents] = await db_1.default.query('SELECT agent_id FROM agents WHERE id = ?', [agentId]);
+            const agentRows = agents;
+            const lettaAgentId = agentRows[0]?.agent_id;
+            // 2. 如果有 Letta agent_id，调用 API 重置 agent 的消息记忆
+            if (lettaAgentId) {
+                try {
+                    await client_1.lettaClient.agents.messages.reset(lettaAgentId, {
+                        add_default_initial_messages: true
+                    });
+                    console.log(`[Message] Reset Letta agent messages for ${lettaAgentId}`);
+                }
+                catch (lettaError) {
+                    // 即使 Letta API 失败，仍然继续删除本地记录
+                    console.error("Failed to reset Letta agent messages:", lettaError);
+                }
+            }
+            // 3. 删除本地数据库中的消息
             const [result] = await db_1.default.query('DELETE FROM messages WHERE agent_id = ?', [agentId]);
             const deleted = result?.affectedRows ?? result?.affected ?? 0;
             console.log(`[Message] Deleted ${deleted} messages for agent ${agentId}`);

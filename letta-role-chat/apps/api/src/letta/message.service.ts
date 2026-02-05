@@ -29,15 +29,29 @@ function parseBase64Image(dataUri: string): { mediaType: string; data: string } 
   return null;
 }
 
-// ✅ 构建 Letta 官方多模态消息格式
-function buildMessageContent(text: string, images?: string[]) {
+// ✅ 构建 Letta 消息内容（支持多模态）
+// Letta SDK 的 input 参数支持：
+// - string: 纯文本
+// - Array<TextContent | ImageContent | ...>: 多模态内容数组
+type LettaTextContent = { type: "text"; text: string };
+type LettaImageContent = { 
+  type: "image"; 
+  source: { 
+    type: "base64"; 
+    data: string; 
+    media_type: string;  // 注意：Letta 使用下划线格式 media_type
+  } 
+};
+type LettaMessageContent = string | Array<LettaTextContent | LettaImageContent>;
+
+function buildMessageContent(text: string, images?: string[]): LettaMessageContent {
   // 如果没有图片，返回包装后的纯文本
   if (!images || images.length === 0) {
     return wrapUserInput(text);
   }
 
   // 有图片时，构建 Letta 官方多模态内容数组
-  const content: Array<any> = [];
+  const content: Array<LettaTextContent | LettaImageContent> = [];
 
   // 添加文本部分
   if (text) {
@@ -55,13 +69,14 @@ function buildMessageContent(text: string, images?: string[]) {
         type: "image",
         source: {
           type: "base64",
-          mediaType: parsed.mediaType,  // ✅ 使用 camelCase（Letta SDK 要求）
+          media_type: parsed.mediaType,  // ✅ Letta SDK 使用下划线格式 media_type
           data: parsed.data
         }
       });
     }
   }
 
+  console.log(`[buildMessageContent] Built multimodal content with ${content.length} parts (text: ${text ? 1 : 0}, images: ${images.length})`);
   return content;
 }
 
@@ -361,16 +376,15 @@ export const messageService = {
     }
 
     try {
-      // ✅ 构建 Letta 官方多模态消息内容
+      // ✅ 构建 Letta 消息内容（现在总是返回字符串）
       const messageContent = buildMessageContent(text, images);
 
       // ✅ 使用异步 API 创建后台任务
       console.log(`[Async] Creating async message for agent ${agentId}${lettaConversationId ? `, conversation: ${lettaConversationId}` : ''}...`);
       
-      // 新版 SDK 使用不同的参数名（下划线格式）
+      // Letta API 的 input 参数接受字符串
       const run = await lettaClient.agents.messages.createAsync(agentId, {
-        input: typeof messageContent === 'string' ? messageContent : undefined,
-        messages: typeof messageContent !== 'string' ? [{ role: "user" as const, content: messageContent }] : undefined,
+        input: messageContent,
       });
 
       const runId = run.id;

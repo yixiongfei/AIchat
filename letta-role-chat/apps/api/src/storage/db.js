@@ -66,6 +66,22 @@ const initDb = async () => {
         INDEX idx_chat_timestamp (chat_id, timestamp)
       )
     `);
+        // 迁移：检查并添加 chat_id 列（如果不存在）
+        try {
+            const [columns] = await connection.query(`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'messages' AND COLUMN_NAME = 'chat_id'
+      `);
+            if (columns.length === 0) {
+                console.log('Migrating: Adding chat_id column to messages table...');
+                await connection.query(`ALTER TABLE messages ADD COLUMN chat_id VARCHAR(255) AFTER agent_id`);
+                await connection.query(`ALTER TABLE messages ADD INDEX idx_chat_timestamp (chat_id, timestamp)`);
+                console.log('Migration complete: chat_id column added');
+            }
+        }
+        catch (migrationError) {
+            console.error('Migration error (chat_id):', migrationError);
+        }
         console.log('Database initialized successfully');
     }
     catch (error) {
