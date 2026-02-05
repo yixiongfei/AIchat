@@ -102,6 +102,10 @@ export function useChatStream({
   
   // ✅ 使用全局 loading 状态管理，支持后台请求跟踪
   const { isLoading, setLoading } = useAgentLoading(role.id);
+  
+  // ✅ 历史加载状态（解决切换 agent 时的闪动问题）
+  // 初始值为 true，因为首次渲染时会立即开始加载历史
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
 
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [textAttachments, setTextAttachments] = useState<TextAttachment[]>([]);
@@ -180,11 +184,9 @@ export function useChatStream({
     // ✅ 更新当前 roleId ref（用于消息隔离）
     currentRoleIdRef.current = role.id;
     
-    // ✅ 切换角色或 chat 时立即清空消息
-    // 注意：不再重置 isLoading，因为现在使用全局状态管理
-    // 旧 agent 的请求会继续在后台完成，其 loading 状态由全局管理器跟踪
-    // 这样用户可以看到后台仍有请求在进行的提示
+    // ✅ 切换角色或 chat 时立即清空旧消息并显示加载状态
     setMessages([]);
+    setIsLoadingHistory(true);
     
     const loadHistory = async () => {
       try {
@@ -197,10 +199,16 @@ export function useChatStream({
         }
         
         if (mounted && currentRoleIdRef.current === role.id) {
+          // ✅ 加载完成后再更新消息
           setMessages(history);
+          setIsLoadingHistory(false);
         }
       } catch (e) {
         console.error("Failed to load history:", e);
+        if (mounted && currentRoleIdRef.current === role.id) {
+          setMessages([]);
+          setIsLoadingHistory(false);
+        }
       }
     };
     loadHistory();
@@ -551,6 +559,7 @@ export function useChatStream({
     input,
     setInput,
     isLoading,
+    isLoadingHistory,
     autoSpeak,
     uploadedImages,
     textAttachments,

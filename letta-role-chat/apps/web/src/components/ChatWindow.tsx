@@ -1,6 +1,7 @@
 import React, {
   useRef,
   useEffect,
+  useState,
   forwardRef,
   useImperativeHandle,
   useCallback,
@@ -70,6 +71,7 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
       input,
       setInput,
       isLoading,
+      isLoadingHistory,
       autoSpeak,
       uploadedImages,
       textAttachments,
@@ -106,6 +108,28 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
     const scrollRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    
+    // ✅ 本地 ready 状态：确保滚动完成后再显示消息，避免闪动
+    // 初始为 false，等待历史加载和滚动完成后才设为 true
+    const [isReady, setIsReady] = useState(false);
+    
+    // ✅ 跟踪当前 role.id，用于检测切换
+    const prevRoleIdRef = useRef(role.id);
+    
+    // ✅ 当切换 agent 时（role.id 变化），立即重置 ready 状态
+    useEffect(() => {
+      if (prevRoleIdRef.current !== role.id) {
+        setIsReady(false);
+        prevRoleIdRef.current = role.id;
+      }
+    }, [role.id]);
+    
+    // ✅ 当开始加载时，立即设置为 not ready
+    useEffect(() => {
+      if (isLoadingHistory) {
+        setIsReady(false);
+      }
+    }, [isLoadingHistory]);
 
     // ✅ 处理粘贴事件：支持文本附件和图片粘贴
     const handlePaste = useCallback(
@@ -152,12 +176,46 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
       [stopSpeak, autoSpeak, handleAutoSpeakChange, clearHistory]
     );
 
-    // 自动滚动到底部
+    // 自动滚动到底部（仅在已 ready 时执行普通滚动）
     useEffect(() => {
-      if (scrollRef.current) {
+      if (isReady && scrollRef.current) {
         scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
       }
-    }, [messages]);
+    }, [messages, isReady]);
+
+    // ✅ 当历史加载完成时，先滚动到底部，再显示消息（避免闪动）
+    useEffect(() => {
+      // 只有当 isLoadingHistory 从 true 变为 false 且有消息时才执行
+      if (!isLoadingHistory && !isReady) {
+        if (messages.length === 0) {
+          // 没有消息，直接显示
+          setIsReady(true);
+          return;
+        }
+        
+        // 有消息时，先让消息渲染（但被隐藏），然后滚动到底部，最后显示
+        // 使用 setTimeout 确保 DOM 已更新
+        const prepareAndShow = () => {
+          if (scrollRef.current) {
+            // 滚动到底部
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+          }
+          // 滚动完成后再显示消息
+          requestAnimationFrame(() => {
+            if (scrollRef.current) {
+              scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            }
+            // 延迟一点再显示，确保滚动已完成
+            setTimeout(() => {
+              setIsReady(true);
+            }, 50);
+          });
+        };
+        
+        // 给 DOM 一点时间来渲染隐藏的消息
+        requestAnimationFrame(prepareAndShow);
+      }
+    }, [isLoadingHistory, isReady, messages.length]);
 
     // 自动调整 textarea 高度
     useEffect(() => {
@@ -234,51 +292,74 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
         )}
 
         <div ref={scrollRef} className={cn("flex-1 overflow-y-auto px-4 py-4", bodyClassName)}>
-          <div ref={containerRef} className="w-full">
+          <div ref={containerRef} className="w-full" style={{ minHeight: '100%' }}>
             <div className={cn("mx-auto w-full max-w-3xl space-y-2", bodyInnerClassName)}>
-              {messages.map((msg, index) => {
-                // 检查是否需要在这条消息后显示推理块
-                // 条件：当前是用户消息，且是最后一条消息或下一条是正在生成的 AI 回复
-                const isLastUserMsg = msg.role === "user" && (
-                  index === messages.length - 1 || 
-                  (index === messages.length - 2 && messages[index + 1]?.role === "assistant" && messages[index + 1]?.id.startsWith("assistant-"))
-                );
-                const showReasoningAfter = isLastUserMsg && (isReasoning || reasoningSteps.length > 0);
-
-                return (
-                  <React.Fragment key={msg.id}>
-                    <MessageBubble
-                      msg={msg}
-                      role={role}
-                      userBubbleClassName={userBubbleClassName}
-                      assistantBubbleClassName={assistantBubbleClassName}
-                      expanded={!!expandedMap[msg.id]}
-                      onToggleExpandedById={toggleExpanded}
-                      autoOpenLongCode={autoOpenLongCode}
-                    />
-                    {/* ✅ 推理过程显示块 - 在用户消息后、AI 回复前显示 */}
-                    {showReasoningAfter && (
-                      <div className="flex justify-start">
-                        <div className="w-full">
-                          <ReasoningBlock
-                            steps={reasoningSteps}
-                            isLoading={isReasoning}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </React.Fragment>
-                );
-              })}
-
-              {isLoading &&
-                !messages.some((m) => m.role === "assistant" && m.id.startsWith("assistant-")) && (
-                  <div className="flex justify-start">
-                    <div className={cn("rounded-2xl rounded-tl-md px-4 py-3", assistantBubbleClassName)}>
-                      <Loader2 className="animate-spin opacity-70" size={18} />
-                    </div>
+              {/* ✅ 加载状态提示 - 在历史加载中显示 */}
+              {isLoadingHistory && (
+                <div className="flex items-center justify-center py-8">
+                  <div className="flex items-center gap-3 text-slate-500 dark:text-slate-400">
+                    <Loader2 className="animate-spin" size={20} />
+                    <span>加载历史消息中...</span>
                   </div>
-                )}
+                </div>
+              )}
+              
+              {/* ✅ 消息列表 - 在滚动准备完成前用 visibility:hidden 隐藏但保留布局 */}
+              {!isLoadingHistory && (
+                <div style={{ visibility: isReady ? 'visible' : 'hidden' }}>
+                  {messages.length === 0 ? (
+                    <div className="flex items-center justify-center py-8 text-slate-400 dark:text-slate-500">
+                      <span>暂无消息，开始对话吧</span>
+                    </div>
+                  ) : (
+                    <>
+                      {messages.map((msg, index) => {
+                        // 检查是否需要在这条消息后显示推理块
+                        // 条件：当前是用户消息，且是最后一条消息或下一条是正在生成的 AI 回复
+                        const isLastUserMsg = msg.role === "user" && (
+                          index === messages.length - 1 || 
+                          (index === messages.length - 2 && messages[index + 1]?.role === "assistant" && messages[index + 1]?.id.startsWith("assistant-"))
+                        );
+                        const showReasoningAfter = isLastUserMsg && (isReasoning || reasoningSteps.length > 0);
+
+                        return (
+                          <React.Fragment key={msg.id}>
+                            <MessageBubble
+                              msg={msg}
+                              role={role}
+                              userBubbleClassName={userBubbleClassName}
+                              assistantBubbleClassName={assistantBubbleClassName}
+                              expanded={!!expandedMap[msg.id]}
+                              onToggleExpandedById={toggleExpanded}
+                              autoOpenLongCode={autoOpenLongCode}
+                            />
+                            {/* ✅ 推理过程显示块 - 在用户消息后、AI 回复前显示 */}
+                            {showReasoningAfter && (
+                              <div className="flex justify-start">
+                                <div className="w-full">
+                                  <ReasoningBlock
+                                    steps={reasoningSteps}
+                                    isLoading={isReasoning}
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+
+                      {isLoading &&
+                        !messages.some((m) => m.role === "assistant" && m.id.startsWith("assistant-")) && (
+                          <div className="flex justify-start">
+                            <div className={cn("rounded-2xl rounded-tl-md px-4 py-3", assistantBubbleClassName)}>
+                              <Loader2 className="animate-spin opacity-70" size={18} />
+                            </div>
+                          </div>
+                        )}
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
