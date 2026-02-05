@@ -297,6 +297,7 @@ export default function ChatList({
                             value={editTitle}
                             onChange={(e) => setEditTitle(e.target.value)}
                             onKeyDown={(e) => handleKeyDown(e, chat.id)}
+                            onBlur={() => saveTitle(chat.id)}
                             placeholder="输入对话标题"
                             title="对话标题"
                             className="flex-1 px-1.5 py-0.5 text-sm rounded
