@@ -82,6 +82,19 @@ function buildMessageContent(text: string, images?: string[]): LettaMessageConte
   return content;
 }
 
+// ✅ Letta 内部 tool return 过滤：这些是 send_message 等内置工具的确认信息，不应作为 assistant 内容
+const LETTA_INTERNAL_TOOL_RETURNS = new Set([
+  'Sent message successfully.',
+  'Message sent successfully.',
+  'None',
+  'null',
+  '',
+]);
+
+function isInternalToolReturn(content: string): boolean {
+  return LETTA_INTERNAL_TOOL_RETURNS.has(content.trim());
+}
+
 // ✅ 延时函数
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -316,12 +329,70 @@ export const messageService = {
         res.write(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`);
       };
 
+      // ✅ 工具调用累积状态：流式 delta 需要先拼完整再解析
+      let pendingToolName = '';
+      let pendingToolArgs = '';
+      let streamStopReason = '';  // 捕获截断原因
+
+      /** 当 tool_call 结束时（类型切换 / 流结束），处理累积的完整工具调用 */
+      const flushPendingToolCall = () => {
+        if (!pendingToolName && !pendingToolArgs) return;
+        
+        if (pendingToolName === 'send_message') {
+          // ✅ send_message: 解析完整 JSON 提取实际消息
+          try {
+            const args = JSON.parse(pendingToolArgs);
+            const msg = args?.message || args?.content || '';
+            if (msg) {
+              writeAssistantContent(msg);
+            }
+          } catch {
+            // JSON 解析失败（可能是 max_tokens 截断），尝试多种正则提取部分内容
+            let extracted = false;
+
+            // 尝试1: 完整的 "message": "..." 匹配
+            const fullMatch = pendingToolArgs.match(/"message"\s*:\s*"([\s\S]*)"\s*\}?\s*$/);
+            if (fullMatch) {
+              const unescaped = fullMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+              writeAssistantContent(unescaped);
+              extracted = true;
+            }
+
+            // 尝试2: 截断场景 — "message": "...（无闭合引号）
+            if (!extracted) {
+              const truncMatch = pendingToolArgs.match(/"message"\s*:\s*"([\s\S]+)$/);
+              if (truncMatch) {
+                const partial = truncMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+                writeAssistantContent(partial);
+                extracted = true;
+                console.warn(`[Stream] send_message truncated by max_tokens, extracted partial content (${partial.length} chars)`);
+              }
+            }
+
+            if (!extracted && pendingToolArgs.length > 20) {
+              console.warn(`[Stream] send_message JSON parse failed, raw args: ${pendingToolArgs.slice(0, 200)}`);
+            }
+          }
+        }
+        // 其他工具：thinking 通知已在首个 chunk 发送过了
+        
+        pendingToolName = '';
+        pendingToolArgs = '';
+      };
+
       const handleChunk = (chunk: any) => {
         const messageType = chunk?.message_type || chunk?.messageType || chunk?.type;
 
-        // 跳过 ping / 停止原因 / 统计
+        // ✅ 当消息类型从 tool_call_message 切换到其他类型时，先 flush 累积的工具调用
+        if (messageType !== "tool_call_message" && (pendingToolName || pendingToolArgs)) {
+          flushPendingToolCall();
+        }
+
+        // 跳过 ping / 统计，捕获停止原因
         if (messageType === "ping") return;
         if (messageType === "stop_reason") {
+          streamStopReason = chunk?.stop_reason || chunk?.reason || chunk?.finish_reason || '';
+          console.log(`[Stream] Stop reason: ${streamStopReason}`);
           return;
         }
         if (messageType === "usage_statistics") {
@@ -363,14 +434,29 @@ export const messageService = {
           return;
         }
 
-        // ✅ 工具调用消息
+        // ✅ 工具调用消息（流式 delta 累积）
+        // Letta 开启 stream_tokens 时，tool_call_message 以多个 delta chunk 到达
+        // 每个 chunk 的 tool_call.arguments 只是一小段，需要累积后一次性解析
         if (messageType === "tool_call_message") {
           const toolCall = chunk?.tool_call || chunk?.toolCall;
-          res.write(`data: ${JSON.stringify({ type: "thinking", tool: toolCall?.name })}\n\n`);
+          const toolName = toolCall?.name || toolCall?.function?.name || chunk?.name || '';
+          const argsDelta = typeof toolCall?.arguments === 'string' ? toolCall.arguments : '';
+          
+          // 首个 chunk 带工具名：记录并发 thinking 通知（非 send_message）
+          if (toolName && !pendingToolName) {
+            pendingToolName = toolName;
+            if (toolName !== 'send_message') {
+              res.write(`data: ${JSON.stringify({ type: "thinking", tool: toolName })}\n\n`);
+            }
+          }
+          
+          // 累积 arguments delta
+          pendingToolArgs += argsDelta;
           return;
         }
 
         // ✅ 工具返回消息（部分模型会把最终文本放在这里）
+        // 过滤掉 Letta 内部 tool return（如 send_message 的 "Sent message successfully."）
         if (messageType === "tool_return_message") {
           const toolReturn =
             chunk?.tool_return ||
@@ -388,7 +474,7 @@ export const messageService = {
             extractText(chunk?.content) ||
             "";
 
-          if (toolContent) {
+          if (toolContent && !isInternalToolReturn(toolContent)) {
             writeAssistantContent(toolContent);
           }
           return;
@@ -411,7 +497,6 @@ export const messageService = {
       // ✅ 检查是否返回的是非流式结果（数组 / 单对象）
       if (Array.isArray(stream)) {
         for (const msg of stream) {
-          const messageType = (msg as any).message_type || (msg as any).messageType || (msg as any).type;
           handleChunk(msg);
         }
       } else if (!isAsyncIterable) {
@@ -419,9 +504,24 @@ export const messageService = {
       } else {
         // ✅ 处理流式响应（AsyncIterable）
         for await (const chunk of stream as AsyncIterable<any>) {
-          const messageType = (chunk as any).message_type || (chunk as any).messageType || (chunk as any).type;
           handleChunk(chunk);
         }
+      }
+
+      // ✅ 流结束后 flush 可能残留的 tool call 累积
+      flushPendingToolCall();
+
+      // ✅ 如果因 max_tokens 截断且没有提取到内容，发送友好提示
+      if (!assistantContent && (streamStopReason === 'max_tokens' || streamStopReason === 'length')) {
+        const truncMsg = "[回复被截断] 模型输出达到 token 上限，请尝试简化问题或分步提问。";
+        assistantContent = truncMsg;
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: truncMsg } }] })}\n\n`);
+        console.warn(`[Stream] Response truncated by max_tokens with no extracted content`);
+      } else if (assistantContent && (streamStopReason === 'max_tokens' || streamStopReason === 'length')) {
+        // 有部分内容但被截断，追加提示
+        const truncNote = "\n\n---\n⚠️ *回复可能不完整（达到 token 上限），请继续追问获取剩余内容。*";
+        assistantContent += truncNote;
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: truncNote } }] })}\n\n`);
       }
 
     } catch (error: any) {
@@ -480,28 +580,164 @@ export const messageService = {
     }
 
     try {
-      // ✅ 构建 Letta 消息内容（现在总是返回字符串）
+      // ✅ 构建 Letta 消息内容（支持多模态）
       const messageContent = buildMessageContent(text, images);
 
-      // ✅ 使用异步 API 创建后台任务（带重试）
-      // ✅ 根据是否有 conversation_id 选择不同 API，确保消息路由到正确 chat
-      console.log(`[Async] Creating async message for agent ${agentId}${lettaConversationId ? `, conversation: ${lettaConversationId}` : ', NO conversation (default context)'}...`);
+      // ✅ conversations.messages 没有 createAsync，只有流式 create()
+      // 所以对 conversation 路径使用流式 API，对 agent 路径使用异步轮询
+      if (lettaConversationId) {
+        // ========== Conversation 路径：使用流式 API ==========
+        console.log(`[Async→Stream] Using streaming for conversation ${lettaConversationId} (conversations.messages has no createAsync)`);
+
+        const stream = await retryOnTransientError(async () => {
+          return await lettaClient.conversations.messages.create(lettaConversationId, {
+            input: messageContent,
+            stream_tokens: DEFAULT_STRATEGY.streamTokens,
+            include_pings: DEFAULT_STRATEGY.includePings,
+            streaming: true,
+          });
+        }, "ConvStream") as AsyncIterable<any>;
+
+        res.write(`data: ${JSON.stringify({ type: "stream_started" })}\n\n`);
+
+        let assistantContent = "";
+
+        const extractText = (content: any) => {
+          if (!content) return "";
+          if (typeof content === "string") return content;
+          if (Array.isArray(content)) {
+            return content.filter((p: any) => p?.type === "text").map((p: any) => p.text).join("");
+          }
+          return "";
+        };
+
+        const writeChunk = (content: string) => {
+          if (!content) return;
+          assistantContent += content;
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`);
+        };
+
+        // ✅ 工具调用累积状态（同 sync 路径逻辑）
+        let pendingToolName2 = '';
+        let pendingToolArgs2 = '';
+        let streamStopReason2 = '';  // 捕获截断原因
+
+        const flushPendingToolCall2 = () => {
+          if (!pendingToolName2 && !pendingToolArgs2) return;
+          if (pendingToolName2 === 'send_message') {
+            try {
+              const args = JSON.parse(pendingToolArgs2);
+              const msg = args?.message || args?.content || '';
+              if (msg) writeChunk(msg);
+            } catch {
+              // 尝试完整匹配
+              const fullMatch = pendingToolArgs2.match(/"message"\s*:\s*"([\s\S]*)"\s*\}?\s*$/);
+              if (fullMatch) {
+                const unescaped = fullMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+                writeChunk(unescaped);
+              } else {
+                // 截断场景：无闭合引号
+                const truncMatch = pendingToolArgs2.match(/"message"\s*:\s*"([\s\S]+)$/);
+                if (truncMatch) {
+                  const partial = truncMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+                  writeChunk(partial);
+                  console.warn(`[Async→Stream] send_message truncated, extracted partial (${partial.length} chars)`);
+                }
+              }
+            }
+          }
+          pendingToolName2 = '';
+          pendingToolArgs2 = '';
+        };
+
+        const handleChunk = (chunk: any) => {
+          const mt = chunk?.message_type || chunk?.messageType || chunk?.type;
+          // 类型切换时 flush 累积的 tool call
+          if (mt !== "tool_call_message" && (pendingToolName2 || pendingToolArgs2)) {
+            flushPendingToolCall2();
+          }
+          if (mt === "ping" || mt === "usage_statistics") return;
+          if (mt === "stop_reason") {
+            streamStopReason2 = chunk?.stop_reason || chunk?.reason || chunk?.finish_reason || '';
+            console.log(`[Async→Stream] Stop reason: ${streamStopReason2}`);
+            return;
+          }
+          if (mt === "assistant_message" || mt === "assistant_message_delta" || mt === "assistant_message_chunk") {
+            const dc = chunk?.delta?.content;
+            writeChunk(typeof dc === "string" ? dc : extractText(chunk?.content));
+            return;
+          }
+          if (mt === "text_stream_token") { writeChunk(chunk?.token || ""); return; }
+          if (mt === "reasoning_message") {
+            const rc = chunk?.reasoning || "";
+            if (rc) res.write(`data: ${JSON.stringify({ type: "reasoning", content: rc, source: chunk?.source || "unknown" })}\n\n`);
+            return;
+          }
+          if (mt === "tool_call_message") {
+            const tc2 = chunk?.tool_call || chunk?.toolCall;
+            const tn = tc2?.name || tc2?.function?.name || chunk?.name || '';
+            const argsDelta = typeof tc2?.arguments === 'string' ? tc2.arguments : '';
+            if (tn && !pendingToolName2) {
+              pendingToolName2 = tn;
+              if (tn !== 'send_message') {
+                res.write(`data: ${JSON.stringify({ type: "thinking", tool: tn })}\n\n`);
+              }
+            }
+            pendingToolArgs2 += argsDelta;
+            return;
+          }
+          if (mt === "tool_return_message") {
+            const tr = chunk?.tool_return || chunk?.toolReturn || chunk?.return || chunk?.result || chunk?.output || chunk?.data;
+            const tc = (typeof tr === "string" ? tr : "") || (typeof tr?.content === "string" ? tr.content : "") || extractText(tr?.content) || (typeof chunk?.content === "string" ? chunk.content : "") || extractText(chunk?.content) || "";
+            if (tc && !isInternalToolReturn(tc)) writeChunk(tc);
+            return;
+          }
+          const fc = chunk?.choices?.[0]?.delta?.content || chunk?.content || chunk?.text || "";
+          if (typeof fc === "string" && fc) writeChunk(fc);
+        };
+
+        const isAsyncIterable = stream && typeof (stream as any)[Symbol.asyncIterator] === "function";
+        if (Array.isArray(stream)) {
+          for (const msg of stream) handleChunk(msg);
+        } else if (!isAsyncIterable) {
+          handleChunk(stream);
+        } else {
+          for await (const chunk of stream as AsyncIterable<any>) handleChunk(chunk);
+        }
+        flushPendingToolCall2();
+
+        // ✅ max_tokens 截断处理
+        if (!assistantContent && (streamStopReason2 === 'max_tokens' || streamStopReason2 === 'length')) {
+          const truncMsg = "[回复被截断] 模型输出达到 token 上限，请尝试简化问题或分步提问。";
+          assistantContent = truncMsg;
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: truncMsg } }] })}\n\n`);
+        } else if (assistantContent && (streamStopReason2 === 'max_tokens' || streamStopReason2 === 'length')) {
+          const truncNote = "\n\n---\n⚠️ *回复可能不完整（达到 token 上限），请继续追问获取剩余内容。*";
+          assistantContent += truncNote;
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: truncNote } }] })}\n\n`);
+        }
+
+        // 保存助手回复到数据库
+        if (assistantContent) {
+          const assistantMsgId = uuidv4();
+          await pool.query(
+            'INSERT INTO messages (id, agent_id, chat_id, role, content, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
+            [assistantMsgId, roleId, chatId || null, 'assistant', assistantContent, Date.now()]
+          );
+        }
+
+        res.write(`data: [DONE]\n\n`);
+        res.end();
+        return;
+      }
+
+      // ========== Agent 路径：使用异步轮询 (createAsync) ==========
+      console.log(`[Async] Creating async message for agent ${agentId}, NO conversation (default context)...`);
 
       const run = await retryOnTransientError(
-        () => {
-          if (lettaConversationId) {
-            // ✅ 使用 conversation 专用 API，确保消息隔离到正确的 chat
-            return lettaClient.conversations.messages.createAsync(lettaConversationId, {
-              input: messageContent,
-            });
-          } else {
-            // 降级到 agent API（无 conversation 时，向后兼容）
-            console.warn(`[Async] No conversation_id for chatId=${chatId}, falling back to agent API`);
-            return lettaClient.agents.messages.createAsync(agentId, {
-              input: messageContent,
-            });
-          }
-        },
+        () => lettaClient.agents.messages.createAsync(agentId, {
+          input: messageContent,
+        }),
         "Async"
       );
 
