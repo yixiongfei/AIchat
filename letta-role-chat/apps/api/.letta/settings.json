@@ -11,7 +11,9 @@
       "Bash(if (Test-Path \".letta\") { echo \"exists\" } else { mkdir .letta })",
       "Write(**)",
       "Bash(letta --help | Select-String -Pattern \"from-af\" -Context 2,2)",
-      "Bash(Get-ChildItem -Path \"$env:USERPROFILE\\.letta\" -Recurse -Include \"*.af\" -ErrorAction SilentlyContinue | Select-Object -First 1 FullName)"
+      "Bash(Get-ChildItem -Path \"$env:USERPROFILE\\.letta\" -Recurse -Include \"*.af\" -ErrorAction SilentlyContinue | Select-Object -First 1 FullName)",
+      "Bash([Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-ChildItem \"C:\\Users\\yi.xiongfei\\Desktop\\個人ファイル\\JR西指令記録配信\\20260206_task1\" | Select-Object Name, Length, LastWriteTime | Format-Table -AutoSize)",
+      "Bash(pip install openpyxl xlrd 2>&1 | Select-Object -Last 3)"
     ]
   }
 }
