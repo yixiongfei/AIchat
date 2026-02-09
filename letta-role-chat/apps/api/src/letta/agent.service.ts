@@ -4,6 +4,8 @@ import pool from "../storage/db";
 import { v4 as uuidv4 } from "uuid";
 import fs from "fs";
 import path from "path";
+import type { RowDataPacket, ResultSetHeader } from "mysql2";
+import type { AgentRow, Role } from "../storage/types";
 
 type MemoryBlock = { label: string; value?: string | null };
 type CloudAgent = {
@@ -12,6 +14,23 @@ type CloudAgent = {
   memory_blocks?: MemoryBlock[];  // 新版 SDK 使用下划线格式
   memoryBlocks?: MemoryBlock[];   // 兼容旧版
 };
+
+/** 将数据库行转换为 Role 对象 */
+function toRole(row: AgentRow): Role {
+  return {
+    id: row.id,
+    name: row.name,
+    persona: row.persona,
+    human: row.human,
+    agentId: row.agent_id,
+    avatar: row.avatar ?? undefined,
+    voice: row.voice,
+    speed: row.speed,
+    pitch: row.pitch,
+    style: row.style,
+    createdAt: row.created_at,
+  };
+}
 
 export const agentService = {
   // 从 Letta Cloud 同步 Agent 数据到本地数据库
@@ -37,7 +56,7 @@ export const agentService = {
         const human =
           memoryBlocks.find((b: MemoryBlock) => b.label === "human")?.value ?? "";
 
-        const [rows]: any = await pool.query(
+        const [rows] = await pool.query<RowDataPacket[]>(
           "SELECT id FROM agents WHERE agent_id = ?",
           [agent.id]
         );
@@ -60,8 +79,8 @@ export const agentService = {
       let deletedCount = 0;
 
       if (pruneDeleted) {
-        const [localRows]: any = await pool.query("SELECT agent_id FROM agents");
-        const localIds: string[] = (localRows ?? []).map((r: any) => r.agent_id);
+        const [localRows] = await pool.query<RowDataPacket[]>("SELECT agent_id FROM agents");
+        const localIds: string[] = localRows.map((r) => r.agent_id);
 
         const staleIds = localIds.filter(id => !cloudIdSet.has(id));
 
@@ -72,13 +91,12 @@ export const agentService = {
           const placeholders = batch.map(() => "?").join(",");
 
           // mysql2 pool.query 支持参数化数组传参 [3](https://sidorares.github.io/node-mysql2/docs)[4](https://www.netjstech.com/2024/08/nodejs-mysql-delete-example.html)
-          const [result]: any = await pool.query(
+          const [result] = await pool.query<ResultSetHeader>(
             `DELETE FROM agents WHERE agent_id IN (${placeholders})`,
             batch
           );
 
-          // affectedRows 在不同返回结构里可能不同，这里尽量兼容
-          deletedCount += result?.affectedRows ?? 0;
+          deletedCount += result.affectedRows;
         }
       }
 
@@ -137,40 +155,15 @@ export const agentService = {
     return { id, name, persona, human, agentId: agent.id, avatar: avatarFileName, voice, speed, pitch, style, createdAt };
   },
 
-  async listRoles() {
-    const [rows]: any = await pool.query("SELECT * FROM agents ORDER BY created_at DESC");
-    return rows.map((row: any) => ({
-      id: row.id,
-      name: row.name,
-      persona: row.persona,
-      human: row.human,
-      agentId: row.agent_id,
-      avatar: row.avatar,
-      voice: row.voice,
-      speed: row.speed,
-      pitch: row.pitch,
-      style: row.style,
-      createdAt: row.created_at,
-    }));
+  async listRoles(): Promise<Role[]> {
+    const [rows] = await pool.query<AgentRow[] & RowDataPacket[]>("SELECT * FROM agents ORDER BY created_at DESC");
+    return rows.map(toRole);
   },
 
-  async getRole(id: string) {
-    const [rows]: any = await pool.query("SELECT * FROM agents WHERE id = ?", [id]);
+  async getRole(id: string): Promise<Role | null> {
+    const [rows] = await pool.query<AgentRow[] & RowDataPacket[]>("SELECT * FROM agents WHERE id = ?", [id]);
     if (rows.length === 0) return null;
-    const row = rows[0];
-    return {
-      id: row.id,
-      name: row.name,
-      persona: row.persona,
-      human: row.human,
-      agentId: row.agent_id,
-      avatar: row.avatar,
-      voice: row.voice,
-      speed: row.speed,
-      pitch: row.pitch,
-      style: row.style,
-      createdAt: row.created_at,
-    };
+    return toRole(rows[0]);
   },
   async updateRole(id: string, data: { name?: string; persona?: string; human?: string; voice?: string; speed?: number; pitch?: string; style?: string; avatarBase64?: string | null }) {
     // 读取当前记录

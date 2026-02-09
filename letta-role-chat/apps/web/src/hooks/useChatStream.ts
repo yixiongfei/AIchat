@@ -482,15 +482,14 @@ export function useChatStream({
     };
 
     try {
-      await api.sendMessageStream(
-        role.id,
-        contentToSend,
-        (chunk: string) => {
+      await api.sendMessageStream({
+        roleId: role.id,
+        message: contentToSend,
+        onChunk: (chunk: string) => {
           // 如果已取消或被新请求替换，忽略
           if (activeRequestIdRef.current !== requestId) return;
           
           // ✅ 消息隔离：如果已切换到其他 agent 或 chat，不写入当前界面
-          // 响应仍在后台继续，切换回来时会从历史加载
           if (shouldIsolate()) {
             console.log(`[Stream] 消息隔离: 响应属于 ${requestRoleId.slice(0,8)}/${requestChatId?.slice(0,8) || 'default'}，当前显示 ${currentRoleIdRef.current.slice(0,8)}/${currentChatIdRef.current?.slice(0,8) || 'default'}`);
             return;
@@ -510,11 +509,9 @@ export function useChatStream({
             });
           }
         },
-        async () => {
+        onDone: async () => {
           if (activeRequestIdRef.current !== requestId) return;
           
-          // ✅ 响应完成：无论是否切换了 agent/chat，都清除该 agent 的 loading 状态
-          // 全局状态管理器会自动更新 UI
           setLoading(false);
           setIsReasoning(false);
           activeRequestIdRef.current = "";
@@ -525,7 +522,6 @@ export function useChatStream({
           // 消息隔离：如果已切换到其他 agent 或 chat，不更新当前界面的消息显示
           if (shouldIsolate()) {
             console.log(`[Stream] 响应完成但已切换 (${requestRoleId.slice(0,8)}/${requestChatId?.slice(0,8) || 'default'} -> ${currentRoleIdRef.current.slice(0,8)}/${currentChatIdRef.current?.slice(0,8) || 'default'})`);
-            // 虽然不显示在当前界面，但 loading 状态已清除
             return;
           }
 
@@ -534,23 +530,19 @@ export function useChatStream({
 
           if (autoSpeak) await flushStream();
         },
-        base64Images,
-        attachmentInfos.length > 0 ? attachmentInfos : undefined,
-        // ✅ 推理回调
-        (step) => {
+        images: base64Images,
+        attachments: attachmentInfos.length > 0 ? attachmentInfos : undefined,
+        onReasoning: (step) => {
           if (activeRequestIdRef.current !== requestId) return;
           if (shouldIsolate()) return;
-          
           setReasoningSteps((prev) => [...prev, step]);
         },
-        // ✅ 工具调用回调
-        (tool) => {
+        onThinking: (tool) => {
           if (activeRequestIdRef.current !== requestId) return;
           console.log(`[Thinking] 使用工具: ${tool}`);
         },
-        // ✅ chatId 参数
-        chatId
-      );
+        chatId,
+      });
     } catch (e) {
       console.error("Chat error:", e);
       if (activeRequestIdRef.current === requestId) {

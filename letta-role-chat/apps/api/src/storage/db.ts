@@ -3,12 +3,22 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+// ✅ 启动时校验必需的数据库环境变量
+const REQUIRED_DB_VARS = ['DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME'] as const;
+const missing = REQUIRED_DB_VARS.filter((key) => !process.env[key]);
+if (missing.length > 0) {
+  console.error(`❌ 缺少必需的数据库环境变量: ${missing.join(', ')}`);
+  console.error('请在 apps/api/.env 中配置，参考 .env.example');
+  process.exit(1);
+}
+
+// ✅ 所有数据库配置从环境变量读取，不再硬编码默认值
 const pool = mysql.createPool({
-  host: process.env.DB_HOST ?? "host.docker.internal",
-  port: Number(process.env.DB_PORT ?? 3306),
-  user: process.env.DB_USER ?? "root",
-  password: process.env.DB_PASSWORD ?? "200106",
-  database: process.env.DB_NAME ?? "letta_chat",
+  host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT || 3306),
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0

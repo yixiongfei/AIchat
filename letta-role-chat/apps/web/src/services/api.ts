@@ -25,10 +25,41 @@ export interface StreamCallbacks {
   onThinking?: (tool: string) => void;
 }
 
+// ✅ 自定义 API 错误类，携带状态码和服务端错误信息
+export class ApiError extends Error {
+  status: number;
+  detail?: string;
+
+  constructor(status: number, message: string, detail?: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+// ✅ 统一请求封装：自动检查响应状态并解析 JSON
+async function request<T>(url: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(url, options);
+
+  if (!res.ok) {
+    // 尝试解析服务端返回的错误信息
+    let detail: string | undefined;
+    try {
+      const body = await res.json();
+      detail = body.error || body.message || JSON.stringify(body);
+    } catch {
+      detail = res.statusText;
+    }
+    throw new ApiError(res.status, `请求失败 (${res.status}): ${detail}`, detail);
+  }
+
+  return res.json();
+}
+
 export const api = {
   async getRoles() {
-    const res = await fetch(`${API_BASE_URL}/roles`);
-    const data = await res.json();
+    const data = await request<any[]>(`${API_BASE_URL}/roles`);
     return data.map((r: any) => ({
       ...r,
       avatar: r.avatar ? `${API_BASE_URL}/avatars/${r.avatar}` : undefined
@@ -45,12 +76,11 @@ export const api = {
     style?: string;
     avatarBase64?: string;
   }) {
-    const res = await fetch(`${API_BASE_URL}/roles`, {
+    return request(`${API_BASE_URL}/roles`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(role),
     });
-    return res.json();
   },
 
   async updateRole(roleId: string, role: { 
@@ -63,40 +93,38 @@ export const api = {
     style?: string;
     avatarBase64?: string | undefined;
   }) {
-    const res = await fetch(`${API_BASE_URL}/roles/${roleId}`, {
+    return request(`${API_BASE_URL}/roles/${roleId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(role),
     });
-    return res.json();
   },
 
   async syncRoles() {
-    const res = await fetch(`${API_BASE_URL}/roles/sync`, { method: 'POST' });
-    return res.json();
+    return request(`${API_BASE_URL}/roles/sync`, { method: 'POST' });
   },
 
   async getHistory(roleId: string) {
-    const res = await fetch(`${API_BASE_URL}/roles/${roleId}/history`);
-    return res.json();
+    return request(`${API_BASE_URL}/roles/${roleId}/history`);
   },
 
   async deleteHistory(roleId: string) {
-    const res = await fetch(`${API_BASE_URL}/messages/${roleId}`, { method: 'DELETE' });
-    return res.json();
+    return request(`${API_BASE_URL}/messages/${roleId}`, { method: 'DELETE' });
   },
 
   async deleteMessage(messageId: string) {
-    const res = await fetch(`${API_BASE_URL}/messages/message/${messageId}`, { method: 'DELETE' });
-    return res.json();
+    return request(`${API_BASE_URL}/messages/message/${messageId}`, { method: 'DELETE' });
   },
 
   async deleteAudio(fileName: string) {
-    await fetch(`${API_BASE_URL}/tts/audio/${fileName}`, { method: 'DELETE' });
+    const res = await fetch(`${API_BASE_URL}/tts/audio/${fileName}`, { method: 'DELETE' });
+    if (!res.ok) {
+      console.error(`删除音频失败: ${res.status}`);
+    }
   },
 
   // ========================================
-  // Chat API（新增）
+  // Chat API
   // ========================================
   
   /** 获取指定 agent 的所有聊天 */
@@ -104,62 +132,69 @@ export const api = {
     const params = new URLSearchParams();
     if (search) params.set('search', search);
     const url = `${API_BASE_URL}/chats/${agentId}${params.toString() ? '?' + params : ''}`;
-    const res = await fetch(url);
-    return res.json();
+    return request<ChatsResponse>(url);
   },
 
   /** 创建新聊天 */
   async createChat(agentId: string, title?: string): Promise<Chat> {
-    const res = await fetch(`${API_BASE_URL}/chats/${agentId}`, {
+    return request<Chat>(`${API_BASE_URL}/chats/${agentId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title }),
     });
-    return res.json();
   },
 
   /** 更新聊天标题 */
   async updateChat(chatId: string, title: string): Promise<{ success: boolean }> {
-    const res = await fetch(`${API_BASE_URL}/chats/${chatId}`, {
+    return request<{ success: boolean }>(`${API_BASE_URL}/chats/${chatId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title }),
     });
-    return res.json();
   },
 
   /** 删除聊天 */
   async deleteChat(chatId: string): Promise<{ success: boolean }> {
-    const res = await fetch(`${API_BASE_URL}/chats/${chatId}`, {
+    return request<{ success: boolean }>(`${API_BASE_URL}/chats/${chatId}`, {
       method: 'DELETE',
     });
-    return res.json();
   },
 
   /** 获取聊天的消息 */
   async getChatMessages(chatId: string): Promise<Message[]> {
-    const res = await fetch(`${API_BASE_URL}/chats/${chatId}/messages`);
-    const data: MessagesResponse = await res.json();
+    const data = await request<MessagesResponse>(`${API_BASE_URL}/chats/${chatId}/messages`);
     return data.messages;
   },
 
   // ✅ 流式消息发送（支持图片、文本附件、推理过程和 chatId）
-  async sendMessageStream(
-    roleId: string,
-    message: string,
-    onChunk: (chunk: string) => void,
-    onDone: () => void,
-    images?: string[],
-    attachments?: AttachmentInfo[],
-    onReasoning?: (step: ReasoningStep) => void,
-    onThinking?: (tool: string) => void,
-    chatId?: string
-  ) {
+  async sendMessageStream(params: {
+    roleId: string;
+    message: string;
+    onChunk: (chunk: string) => void;
+    onDone: () => void;
+    images?: string[];
+    attachments?: AttachmentInfo[];
+    onReasoning?: (step: ReasoningStep) => void;
+    onThinking?: (tool: string) => void;
+    chatId?: string;
+  }) {
+    const { roleId, message, onChunk, onDone, images, attachments, onReasoning, onThinking, chatId } = params;
+
     const response = await fetch(`${API_BASE_URL}/messages/${roleId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, images, attachments, chatId }),
     });
+
+    // ✅ 流式请求也需检查 HTTP 状态
+    if (!response.ok) {
+      let detail = response.statusText;
+      try {
+        const body = await response.json();
+        detail = body.error || body.message || detail;
+      } catch { /* ignore */ }
+      throw new ApiError(response.status, `发送消息失败 (${response.status}): ${detail}`, detail);
+    }
 
     if (!response.body) {
       onDone();

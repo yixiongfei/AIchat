@@ -3,6 +3,8 @@ import pool from "../storage/db";
 import { v4 as uuidv4 } from "uuid";
 import "dotenv/config";
 import { lettaClient } from "./client";
+import type { RowDataPacket, ResultSetHeader } from "mysql2";
+import type { MessageRow, DeleteResult } from "../storage/types";
 
 function normalizeBaseUrl(url: string) {
   return url.replace(/\/$/, "");
@@ -215,12 +217,11 @@ async function getLettaConversationId(chatId?: string): Promise<string | null> {
   if (!chatId) return null;
   
   try {
-    const [rows] = await pool.query(
+    const [rows] = await pool.query<RowDataPacket[]>(
       'SELECT letta_conversation_id FROM chats WHERE id = ?',
       [chatId]
     );
-    const chats = rows as any[];
-    return chats.length > 0 ? chats[0].letta_conversation_id : null;
+    return rows.length > 0 ? rows[0].letta_conversation_id : null;
   } catch (error) {
     console.error("[getLettaConversationId] Error:", error);
     return null;
@@ -616,7 +617,7 @@ export const messageService = {
 
   async getHistory(roleId: string, chatId?: string) {
     let query = 'SELECT * FROM messages WHERE agent_id = ?';
-    const params: any[] = [roleId];
+    const params: (string | null)[] = [roleId];
     
     if (chatId) {
       query += ' AND chat_id = ?';
@@ -628,8 +629,8 @@ export const messageService = {
     
     query += ' ORDER BY timestamp ASC';
     
-    const [rows]: any = await pool.query(query, params);
-    return rows.map((row: any) => ({
+    const [rows] = await pool.query<MessageRow[] & RowDataPacket[]>(query, params);
+    return rows.map((row) => ({
       id: row.id,
       role: row.role,
       content: row.content,
@@ -638,15 +639,14 @@ export const messageService = {
     }));
   },
 
-  async deleteHistory(agentId: string) {
+  async deleteHistory(agentId: string): Promise<DeleteResult> {
     try {
       // 1. 先从数据库获取对应的 Letta agent_id
-      const [agents] = await pool.query(
+      const [agentRows] = await pool.query<RowDataPacket[]>(
         'SELECT agent_id FROM agents WHERE id = ?',
         [agentId]
       );
       
-      const agentRows = agents as any[];
       const lettaAgentId = agentRows[0]?.agent_id;
 
       // 2. 如果有 Letta agent_id，调用 API 重置 agent 的消息记忆
@@ -663,8 +663,8 @@ export const messageService = {
       }
 
       // 3. 删除本地数据库中的消息
-      const [result]: any = await pool.query('DELETE FROM messages WHERE agent_id = ?', [agentId]);
-      const deleted = result?.affectedRows ?? result?.affected ?? 0;
+      const [result] = await pool.query<ResultSetHeader>('DELETE FROM messages WHERE agent_id = ?', [agentId]);
+      const deleted = result.affectedRows;
       console.log(`[Message] Deleted ${deleted} messages for agent ${agentId}`);
       return { success: true, deleted };
     } catch (e) {
@@ -673,11 +673,11 @@ export const messageService = {
     }
   },
 
-  async deleteMessage(messageId: string) {
+  async deleteMessage(messageId: string): Promise<DeleteResult> {
     try {
       // 删除数据库中的单条消息
-      const [result]: any = await pool.query('DELETE FROM messages WHERE id = ?', [messageId]);
-      const deleted = result?.affectedRows ?? result?.affected ?? 0;
+      const [result] = await pool.query<ResultSetHeader>('DELETE FROM messages WHERE id = ?', [messageId]);
+      const deleted = result.affectedRows;
       console.log(`[Message] Deleted message ${messageId}, affected rows: ${deleted}`);
       return { success: deleted > 0, deleted };
     } catch (e) {

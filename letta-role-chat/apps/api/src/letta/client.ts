@@ -8,7 +8,9 @@ const LETTA_BASE_URL = process.env.LETTA_BASE_URL || "https://api.letta.com";
 const LETTA_API_KEY = process.env.LETTA_API_KEY;
 
 if (!LETTA_API_KEY) {
-  console.warn("WARNING: LETTA_API_KEY is not set. This is required for Letta Cloud.");
+  console.error("❌ 缺少必需的环境变量: LETTA_API_KEY");
+  console.error("请在 apps/api/.env 中配置，参考 .env.example");
+  process.exit(1);
 }
 
 // 新版 SDK (v1.x) 使用 Letta 类和 apiKey/baseURL 配置
