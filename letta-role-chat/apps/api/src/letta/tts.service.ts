@@ -166,7 +166,7 @@ async function resolveAgentTTSConfig(params: {
 }) {
   const { agentId } = params;
 
-  let agentCfg: Partial<typeof DEFAULT_TTS> = {};
+  let agentCfg: { voice?: string; speed?: number; pitch?: string; style?: string } = {};
 
   // ✅ 只有传了 agentId 才查 DB
   if (agentId) {
