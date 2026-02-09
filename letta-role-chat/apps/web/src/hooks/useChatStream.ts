@@ -420,6 +420,12 @@ export function useChatStream({
   const send = useCallback(async () => {
     const hasTextAttachments = textAttachments.length > 0;
     if ((!input.trim() && uploadedImages.length === 0 && !hasTextAttachments) || isLoading) return;
+    
+    // ✅ 阻止在 chat 切换过程中发送消息，避免消息路由到错误的 chat
+    if (isLoadingHistory) {
+      console.warn('[Send] Blocked: chat is still loading, please wait');
+      return;
+    }
 
     const contentToSend = input.trim();
     const imagesToSend = [...uploadedImages];
@@ -469,9 +475,12 @@ export function useChatStream({
     const requestId = "req-" + Date.now();
     activeRequestIdRef.current = requestId;
     
-    // ✅ 记录发起请求时的 roleId 和 chatId，用于消息隔离
-    const requestRoleId = role.id;
-    const requestChatId = chatId;
+    // ✅ 快照发起请求时的 roleId 和 chatId，用于消息隔离
+    // 使用 ref 确保始终读取最新的 chatId，防止闭包过期导致消息路由错误
+    const requestRoleId = currentRoleIdRef.current;
+    const requestChatId = currentChatIdRef.current;
+    
+    console.log(`[Send] Sending to role=${requestRoleId.slice(0,8)}, chatId=${requestChatId || 'default(null)'}`);
 
     const assistantMsgId = "assistant-" + Date.now();
     let assistantContent = "";
@@ -483,8 +492,9 @@ export function useChatStream({
 
     try {
       await api.sendMessageStream({
-        roleId: role.id,
+        roleId: requestRoleId,
         message: contentToSend,
+        chatId: requestChatId,
         onChunk: (chunk: string) => {
           // 如果已取消或被新请求替换，忽略
           if (activeRequestIdRef.current !== requestId) return;
@@ -541,7 +551,6 @@ export function useChatStream({
           if (activeRequestIdRef.current !== requestId) return;
           console.log(`[Thinking] 使用工具: ${tool}`);
         },
-        chatId,
       });
     } catch (e) {
       console.error("Chat error:", e);
@@ -557,8 +566,7 @@ export function useChatStream({
     uploadedImages,
     textAttachments,
     isLoading,
-    role.id,
-    chatId,
+    isLoadingHistory,
     autoSpeak,
     appendStream,
     flushStream,

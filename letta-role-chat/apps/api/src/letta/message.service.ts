@@ -484,12 +484,24 @@ export const messageService = {
       const messageContent = buildMessageContent(text, images);
 
       // ✅ 使用异步 API 创建后台任务（带重试）
-      console.log(`[Async] Creating async message for agent ${agentId}${lettaConversationId ? `, conversation: ${lettaConversationId}` : ''}...`);
+      // ✅ 根据是否有 conversation_id 选择不同 API，确保消息路由到正确 chat
+      console.log(`[Async] Creating async message for agent ${agentId}${lettaConversationId ? `, conversation: ${lettaConversationId}` : ', NO conversation (default context)'}...`);
 
       const run = await retryOnTransientError(
-        () => lettaClient.agents.messages.createAsync(agentId, {
-          input: messageContent,
-        }),
+        () => {
+          if (lettaConversationId) {
+            // ✅ 使用 conversation 专用 API，确保消息隔离到正确的 chat
+            return lettaClient.conversations.messages.createAsync(lettaConversationId, {
+              input: messageContent,
+            });
+          } else {
+            // 降级到 agent API（无 conversation 时，向后兼容）
+            console.warn(`[Async] No conversation_id for chatId=${chatId}, falling back to agent API`);
+            return lettaClient.agents.messages.createAsync(agentId, {
+              input: messageContent,
+            });
+          }
+        },
         "Async"
       );
 

@@ -2,7 +2,7 @@
 import React, { useMemo, useState, useCallback } from "react";
 import { Message, Role } from "../types";
 import AssistantMessageContent from "./AssistantMessageContent";
-import { Code, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
+import { Code, ChevronDown, ChevronUp, Trash2, Copy, Check } from "lucide-react";
 import {
   DEFAULT_THRESHOLDS,
   previewText,
@@ -191,6 +191,25 @@ export default React.memo(function MessageBubble(props: {
     onDelete(msg.id);
   }, [onDelete, msg.id]);
 
+  // ✅ 复制消息处理函数
+  const [copied, setCopied] = useState(false);
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(msg.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = msg.content;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }, [msg.content]);
+
   // ✅ 判断是否为长消息，长消息 AI 回复需要拓宽
   const isLong = useMemo(() => isLongMessage(msg.content), [msg.content]);
 
@@ -282,19 +301,6 @@ export default React.memo(function MessageBubble(props: {
             : cn("rounded-tl-md", assistantBubbleClassName)
         )}
       >
-        {/* ✅ 删除按钮：鼠标悬停时显示 */}
-        {onDelete && (
-          <button
-            type="button"
-            onClick={handleDelete}
-            className="absolute -top-2 -right-2 p-1.5 rounded-full bg-red-500 text-white opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-red-600 hover:scale-110"
-            title="删除消息"
-            aria-label="删除消息"
-          >
-            <Trash2 size={14} />
-          </button>
-        )}
-
         {/* 图片 */}
         {msg.images && msg.images.length > 0 && (
           <div className="mb-2 grid grid-cols-2 gap-2 max-w-md">
@@ -320,6 +326,30 @@ export default React.memo(function MessageBubble(props: {
         )}
 
         {contentNode}
+
+        {/* ✅ 操作按钮栏：鼠标悬停时显示 */}
+        <div className="flex items-center gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+            title={copied ? "已复制" : "复制"}
+            aria-label="复制消息"
+          >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+          </button>
+          {onDelete && (
+            <button
+              type="button"
+              onClick={handleDelete}
+              className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-500/20 transition-colors text-slate-400 hover:text-red-500"
+              title="删除消息"
+              aria-label="删除消息"
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
