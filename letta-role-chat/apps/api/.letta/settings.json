@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit(src\\routes/**)",
+      "Bash(Get-ChildItem -Path \"C:\\Users\\yi.xiongfei\\Desktop\\MyGames\\AIchat\\letta-role-chat-cloud\\letta-role-chat\\apps\\web\\src\" -Recurse -Include *useChatStream* | Select-Object FullName)",
+      "Bash(Get-ChildItem -Path \"C:\\Users\\yi.xiongfei\\Desktop\\MyGames\\AIchat\\letta-role-chat-cloud\\letta-role-chat\\apps\\web\\src\" -Recurse -Include *api*.ts | Where-Object { $_.Directory.Name -eq 'services' } | Select-Object FullName)",
+      "Edit(/C:\\Users\\yi.xiongfei\\Desktop\\MyGames\\AIchat\\letta-role-chat-cloud\\letta-role-chat\\apps\\web\\src\\services/**)",
+      "Edit(/C:\\Users\\yi.xiongfei\\Desktop\\MyGames\\AIchat\\letta-role-chat-cloud\\letta-role-chat\\apps\\web\\src\\hooks/**)",
+      "Edit(/C:\\Users\\yi.xiongfei\\Desktop\\MyGames\\AIchat\\letta-role-chat-cloud\\letta-role-chat\\apps\\web\\src\\components/**)",
+      "Bash(letta agents list --query \"search\" 2>&1 | ConvertFrom-Json)",
+      "Bash(if (Test-Path \".letta\") { echo \"exists\" } else { mkdir .letta })",
+      "Write(**)",
+      "Bash(letta --help | Select-String -Pattern \"from-af\" -Context 2,2)",
+      "Bash(Get-ChildItem -Path \"$env:USERPROFILE\\.letta\" -Recurse -Include \"*.af\" -ErrorAction SilentlyContinue | Select-Object -First 1 FullName)"
+    ]
+  }
+}

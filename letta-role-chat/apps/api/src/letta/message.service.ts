@@ -85,6 +85,42 @@ function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// ✅ 判断是否为可重试的瞬态网络错误
+function isTransientError(error: any): boolean {
+  const code = error?.cause?.code || error?.code;
+  const transientCodes = ['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED', 'EPIPE', 'EAI_AGAIN'];
+  if (transientCodes.includes(code)) return true;
+  // fetch failed 通常是网络层错误
+  if (error?.cause?.message?.includes('fetch failed')) return true;
+  if (error?.message?.includes('Connection error')) return true;
+  return false;
+}
+
+// ✅ 带指数退避的重试包装器（用于流式/异步 API 调用）
+async function retryOnTransientError<T>(
+  fn: () => Promise<T>,
+  label: string,
+  maxRetries = 3,
+  baseDelay = 1000,
+): Promise<T> {
+  let lastError: any;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+      if (attempt < maxRetries && isTransientError(error)) {
+        const delay = baseDelay * Math.pow(2, attempt); // 1s, 2s, 4s
+        console.warn(`[${label}] Transient error (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay}ms...`, error.message);
+        await sleep(delay);
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError;
+}
+
 // ✅ 从 Run 结果中提取 assistant 消息内容
 function extractAssistantContent(run: any): string {
   if (!run.messages || !Array.isArray(run.messages)) {
@@ -237,26 +273,26 @@ export const messageService = {
 
     try {
 
-      let stream: AsyncIterable<any>;
-
-      // ✅ 根据是否有 conversation_id 选择不同的 API
-      if (lettaConversationId) {
-        // 使用 conversation 专用 API，确保消息隔离
-        stream = await lettaClient.conversations.messages.create(lettaConversationId, {
-          input: wrapUserInput(text),
-          stream_tokens: DEFAULT_STRATEGY.streamTokens,
-          include_pings: DEFAULT_STRATEGY.includePings,
-          streaming: true,  // ✅ 添加 streaming: true，否则不会返回流式响应
-        });
-      } else {
-        // 使用传统的 agent API（向后兼容）
-        stream = await lettaClient.agents.messages.create(agentId, {
-          input: wrapUserInput(text),
-          stream_tokens: DEFAULT_STRATEGY.streamTokens,
-          include_pings: DEFAULT_STRATEGY.includePings,
-          streaming: true,
-        });
-      }
+      // ✅ 根据是否有 conversation_id 选择不同的 API（带重试）
+      const stream = await retryOnTransientError(async () => {
+        if (lettaConversationId) {
+          // 使用 conversation 专用 API，确保消息隔离
+          return await lettaClient.conversations.messages.create(lettaConversationId, {
+            input: wrapUserInput(text),
+            stream_tokens: DEFAULT_STRATEGY.streamTokens,
+            include_pings: DEFAULT_STRATEGY.includePings,
+            streaming: true,  // ✅ 添加 streaming: true，否则不会返回流式响应
+          });
+        } else {
+          // 使用传统的 agent API（向后兼容）
+          return await lettaClient.agents.messages.create(agentId, {
+            input: wrapUserInput(text),
+            stream_tokens: DEFAULT_STRATEGY.streamTokens,
+            include_pings: DEFAULT_STRATEGY.includePings,
+            streaming: true,
+          });
+        }
+      }, "Stream") as AsyncIterable<any>;
 
       // 通知前端开始流式
       res.write(`data: ${JSON.stringify({ type: "stream_started" })}\n\n`);
@@ -388,8 +424,12 @@ export const messageService = {
       }
 
     } catch (error: any) {
-      console.error("[Stream] Error:", error);
-      res.write(`data: ${JSON.stringify({ error: "Stream error", detail: error.message })}\n\n`);
+      const isNetwork = isTransientError(error);
+      console.error(`[Stream] ${isNetwork ? 'Network' : 'API'} error:`, error.message || error);
+      const userMessage = isNetwork
+        ? "网络连接失败，请检查网络后重试"
+        : (error.message || "Stream error");
+      res.write(`data: ${JSON.stringify({ error: userMessage, detail: error.message, retryable: isNetwork })}\n\n`);
     }
 
     // 2. 保存助手回复到数据库
@@ -442,13 +482,15 @@ export const messageService = {
       // ✅ 构建 Letta 消息内容（现在总是返回字符串）
       const messageContent = buildMessageContent(text, images);
 
-      // ✅ 使用异步 API 创建后台任务
+      // ✅ 使用异步 API 创建后台任务（带重试）
       console.log(`[Async] Creating async message for agent ${agentId}${lettaConversationId ? `, conversation: ${lettaConversationId}` : ''}...`);
-      
-      // Letta API 的 input 参数接受字符串
-      const run = await lettaClient.agents.messages.createAsync(agentId, {
-        input: messageContent,
-      });
+
+      const run = await retryOnTransientError(
+        () => lettaClient.agents.messages.createAsync(agentId, {
+          input: messageContent,
+        }),
+        "Async"
+      );
 
       const runId = run.id;
       if (!runId) {
@@ -477,7 +519,10 @@ export const messageService = {
         await sleep(asyncPollInterval);
 
         // 获取运行状态
-        const currentRun = await lettaClient.runs.retrieve(runId);
+        const currentRun = await retryOnTransientError(
+          () => lettaClient.runs.retrieve(runId),
+          "AsyncPoll"
+        );
         
         // 状态变化时通知前端
         if (currentRun.status !== lastStatus) {
@@ -488,8 +533,11 @@ export const messageService = {
 
         // 检查是否完成
         if (currentRun.status === "completed") {
-          // ✅ 获取完整的运行结果（包含消息）
-          const messagesPage = await lettaClient.runs.messages.list(runId);
+          // ✅ 获取完整的运行结果（包含消息）（带重试）
+          const messagesPage = await retryOnTransientError(
+            () => lettaClient.runs.messages.list(runId),
+            "AsyncMessages"
+          );
           
           // 提取 assistant 消息（新版 SDK 使用 message_type 而非 messageType）
           for await (const msg of messagesPage) {
@@ -556,8 +604,12 @@ export const messageService = {
       res.write(`data: [DONE]\n\n`);
       res.end();
     } catch (error: any) {
-      console.error("[Async] Error:", error);
-      res.write(`data: ${JSON.stringify({ error: "Failed to process message", detail: error.message })}\n\n`);
+      const isNetwork = isTransientError(error);
+      console.error(`[Async] ${isNetwork ? 'Network' : 'API'} error:`, error.message || error);
+      const userMessage = isNetwork
+        ? "网络连接失败，请检查网络后重试"
+        : (error.message || "Failed to process message");
+      res.write(`data: ${JSON.stringify({ error: userMessage, detail: error.message, retryable: isNetwork })}\n\n`);
       res.end();
     }
   },
@@ -617,6 +669,19 @@ export const messageService = {
       return { success: true, deleted };
     } catch (e) {
       console.error("Failed to delete history:", e);
+      throw e;
+    }
+  },
+
+  async deleteMessage(messageId: string) {
+    try {
+      // 删除数据库中的单条消息
+      const [result]: any = await pool.query('DELETE FROM messages WHERE id = ?', [messageId]);
+      const deleted = result?.affectedRows ?? result?.affected ?? 0;
+      console.log(`[Message] Deleted message ${messageId}, affected rows: ${deleted}`);
+      return { success: deleted > 0, deleted };
+    } catch (e) {
+      console.error("Failed to delete message:", e);
       throw e;
     }
   }

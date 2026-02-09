@@ -84,6 +84,7 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
       cancelStream,
       stopSpeak,
       clearHistory,
+      deleteMessage,
       handleAutoSpeakChange,
       fileInputRef,
       openFileDialog,
@@ -332,6 +333,7 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
                               expanded={!!expandedMap[msg.id]}
                               onToggleExpandedById={toggleExpanded}
                               autoOpenLongCode={autoOpenLongCode}
+                              onDelete={deleteMessage}
                             />
                             {/* ✅ 推理过程显示块 - 在用户消息后、AI 回复前显示 */}
                             {showReasoningAfter && (

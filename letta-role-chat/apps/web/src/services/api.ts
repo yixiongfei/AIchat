@@ -86,6 +86,11 @@ export const api = {
     return res.json();
   },
 
+  async deleteMessage(messageId: string) {
+    const res = await fetch(`${API_BASE_URL}/messages/message/${messageId}`, { method: 'DELETE' });
+    return res.json();
+  },
+
   async deleteAudio(fileName: string) {
     await fetch(`${API_BASE_URL}/tts/audio/${fileName}`, { method: 'DELETE' });
   },

@@ -400,6 +400,22 @@ export function useChatStream({
     }
   }, [role?.id]);
 
+  /** 删除单条消息 */
+  const deleteMessage = useCallback(async (messageId: string) => {
+    try {
+      const result = await api.deleteMessage(messageId);
+      if (result.success) {
+        setMessages((prev) => prev.filter((msg) => msg.id !== messageId));
+        console.log("消息已删除");
+      } else {
+        console.error("删除失败：消息不存在");
+      }
+    } catch (e) {
+      console.error("Failed to delete message", e);
+      console.error("删除消息失败");
+    }
+  }, []);
+
   /** 发送消息（含图片 base64 和文本附件） */
   const send = useCallback(async () => {
     const hasTextAttachments = textAttachments.length > 0;
@@ -591,6 +607,7 @@ export function useChatStream({
     cancelStream,
     stopSpeak,
     clearHistory,
+    deleteMessage,
     handleAutoSpeakChange,
 
     // upload

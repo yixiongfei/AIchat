@@ -15,4 +15,6 @@ if (!LETTA_API_KEY) {
 export const lettaClient = new Letta({
   apiKey: LETTA_API_KEY,
   baseURL: LETTA_BASE_URL,
+  maxRetries: 4,          // 网络抖动时自动重试（默认 2 次太少）
+  timeout: 2 * 60 * 1000, // 2 分钟超时（默认 1 分钟，流式场景可能不够）
 });

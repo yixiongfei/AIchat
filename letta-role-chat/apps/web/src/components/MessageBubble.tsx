@@ -2,7 +2,7 @@
 import React, { useMemo, useState, useCallback } from "react";
 import { Message, Role } from "../types";
 import AssistantMessageContent from "./AssistantMessageContent";
-import { Code, ChevronDown, ChevronUp } from "lucide-react";
+import { Code, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import {
   DEFAULT_THRESHOLDS,
   previewText,
@@ -163,6 +163,9 @@ export default React.memo(function MessageBubble(props: {
   onToggleExpandedById: (id: string) => void;
 
   autoOpenLongCode?: boolean;
+  
+  // ✅ 删除消息回调
+  onDelete?: (messageId: string) => void;
 }) {
   const {
     msg,
@@ -172,6 +175,7 @@ export default React.memo(function MessageBubble(props: {
     expanded,
     onToggleExpandedById,
     autoOpenLongCode = true,
+    onDelete,
   } = props;
 
   const isUser = msg.role === "user";
@@ -180,6 +184,12 @@ export default React.memo(function MessageBubble(props: {
     () => shouldCollapseMessage(msg.content),
     [msg.content]
   );
+
+  // ✅ 删除消息处理函数
+  const handleDelete = useCallback(() => {
+    if (!onDelete) return;
+    onDelete(msg.id);
+  }, [onDelete, msg.id]);
 
   // ✅ 判断是否为长消息，长消息 AI 回复需要拓宽
   const isLong = useMemo(() => isLongMessage(msg.content), [msg.content]);
@@ -254,10 +264,10 @@ export default React.memo(function MessageBubble(props: {
   ]);
 
   return (
-    <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
+    <div className={cn("flex group", isUser ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "rounded-2xl px-4 py-3 text-base leading-relaxed",
+          "relative rounded-2xl px-4 py-3 text-base leading-relaxed",
           // ✅ 动态宽度：
           // - 用户消息：保持 max-w-[80%]
           // - AI 短回复：max-w-[80%]
@@ -272,6 +282,19 @@ export default React.memo(function MessageBubble(props: {
             : cn("rounded-tl-md", assistantBubbleClassName)
         )}
       >
+        {/* ✅ 删除按钮：鼠标悬停时显示 */}
+        {onDelete && (
+          <button
+            type="button"
+            onClick={handleDelete}
+            className="absolute -top-2 -right-2 p-1.5 rounded-full bg-red-500 text-white opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-red-600 hover:scale-110"
+            title="删除消息"
+            aria-label="删除消息"
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
+
         {/* 图片 */}
         {msg.images && msg.images.length > 0 && (
           <div className="mb-2 grid grid-cols-2 gap-2 max-w-md">

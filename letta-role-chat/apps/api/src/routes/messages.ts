@@ -70,4 +70,20 @@ router.delete('/:roleId', async (req, res) => {
   }
 });
 
+// 删除单条消息
+router.delete('/message/:messageId', async (req, res) => {
+  const { messageId } = req.params;
+  try {
+    const result = await messageService.deleteMessage(messageId);
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(404).json({ error: 'Message not found' });
+    }
+  } catch (error) {
+    console.error('Delete message error:', error);
+    res.status(500).json({ error: 'Failed to delete message' });
+  }
+});
+
 export default router;
