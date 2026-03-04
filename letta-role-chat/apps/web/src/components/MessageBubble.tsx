@@ -12,6 +12,22 @@ import {
 const cn = (...classes: Array<string | false | null | undefined>) =>
   classes.filter(Boolean).join(" ");
 
+/** 相对时间显示 */
+function relativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return "刚刚";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}分钟前`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}小时前`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}天前`;
+  // 超过 30 天显示日期
+  const d = new Date(ts);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
 /**
  * 更稳的 fenced code block 正则：
  * - 支持 ```lang\ncode```、``` \ncode```、Windows \r\n
@@ -283,7 +299,7 @@ export default React.memo(function MessageBubble(props: {
   ]);
 
   return (
-    <div className={cn("flex group", isUser ? "justify-end" : "justify-start")}>
+    <div className={cn("group", isUser ? "flex flex-col items-end" : "flex flex-col items-start")}>
       <div
         className={cn(
           "relative rounded-2xl px-4 py-3 text-base leading-relaxed",
@@ -326,30 +342,38 @@ export default React.memo(function MessageBubble(props: {
         )}
 
         {contentNode}
+      </div>
 
-        {/* ✅ 操作按钮栏：鼠标悬停时显示 */}
-        <div className="flex items-center gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+      {/* ✅ 操作按钮栏：气泡外部下方，鼠标悬停时显示 */}
+      <div className={cn(
+        "flex items-center gap-1.5 mt-1 h-6 opacity-0 group-hover:opacity-100 transition-opacity",
+        isUser ? "pr-1 flex-row-reverse" : "pl-1"
+      )}>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+          title={copied ? "已复制" : "复制"}
+          aria-label="复制消息"
+        >
+          {copied ? <Check size={14} /> : <Copy size={14} />}
+        </button>
+        {onDelete && (
           <button
             type="button"
-            onClick={handleCopy}
-            className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-            title={copied ? "已复制" : "复制"}
-            aria-label="复制消息"
+            onClick={handleDelete}
+            className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-500/20 transition-colors text-slate-400 hover:text-red-500"
+            title="删除消息"
+            aria-label="删除消息"
           >
-            {copied ? <Check size={14} /> : <Copy size={14} />}
+            <Trash2 size={14} />
           </button>
-          {onDelete && (
-            <button
-              type="button"
-              onClick={handleDelete}
-              className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-500/20 transition-colors text-slate-400 hover:text-red-500"
-              title="删除消息"
-              aria-label="删除消息"
-            >
-              <Trash2 size={14} />
-            </button>
-          )}
-        </div>
+        )}
+        {msg.timestamp && (
+          <span className="text-[11px] text-slate-500 dark:text-slate-500 select-none">
+            {relativeTime(msg.timestamp)}
+          </span>
+        )}
       </div>
     </div>
   );

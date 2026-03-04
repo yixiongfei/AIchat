@@ -15,14 +15,14 @@ export interface ReasoningBlockProps {
 
 /**
  * 推理过程折叠块组件
- * 显示 AI 的完整推理内容，默认展开，可折叠
+ * 显示 AI 的完整推理内容，默认折叠，用户可手动展开
  */
 export default function ReasoningBlock({
   steps,
   isLoading = false,
   className,
 }: ReasoningBlockProps) {
-  const [isExpanded, setIsExpanded] = useState(true); // 默认展开
+  const [isExpanded, setIsExpanded] = useState(false); // 默认折叠
 
   // 计算总推理时间
   const duration = useMemo(() => {

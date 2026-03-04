@@ -8,7 +8,8 @@ function getInitialTheme() {
   const saved = localStorage.getItem("theme");
   if (saved) return saved === "dark";
   
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+  // 默认暗色主题
+  return window.matchMedia?.("(prefers-color-scheme: light)").matches ? false : true;
 }
 
 export default function useTheme() {

@@ -223,7 +223,7 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
       const textarea = textareaRef.current;
       if (!textarea) return;
       textarea.style.height = "auto";
-      const newHeight = Math.min(Math.max(textarea.scrollHeight, 40), 120);
+      const newHeight = Math.min(Math.max(textarea.scrollHeight, 40), 200);
       textarea.style.height = `${newHeight}px`;
     }, [input]);
 
@@ -294,7 +294,7 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
 
         <div ref={scrollRef} className={cn("flex-1 overflow-y-auto px-4 py-4", bodyClassName)}>
           <div ref={containerRef} className="w-full" style={{ minHeight: '100%' }}>
-            <div className={cn("mx-auto w-full max-w-3xl space-y-2", bodyInnerClassName)}>
+            <div className={cn("mx-auto w-full max-w-3xl space-y-1", bodyInnerClassName)}>
               {/* ✅ 加载状态提示 - 在历史加载中显示 */}
               {isLoadingHistory && (
                 <div className="flex items-center justify-center py-8">
@@ -309,8 +309,37 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
               {!isLoadingHistory && (
                 <div style={{ visibility: isReady ? 'visible' : 'hidden' }}>
                   {messages.length === 0 ? (
-                    <div className="flex items-center justify-center py-8 text-slate-400 dark:text-slate-500">
-                      <span>暂无消息，开始对话吧</span>
+                    <div className="flex flex-col items-center justify-center py-12 gap-4">
+                      {/* 角色头像 */}
+                      {role.avatar ? (
+                        <img
+                          src={role.avatar}
+                          alt={role.name}
+                          className="w-16 h-16 rounded-full object-cover ring-2 ring-slate-300 dark:ring-slate-700/50"
+                        />
+                      ) : (
+                        <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-2xl font-bold">
+                          {role.name.charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      <div className="text-center">
+                        <div className="text-sm text-slate-500 dark:text-slate-400">
+                          和 <span className="font-medium text-slate-800 dark:text-slate-100">{role.name}</span> 开始对话
+                        </div>
+                      </div>
+                      {/* 快捷提问 */}
+                      <div className="flex flex-wrap justify-center gap-2 mt-2 max-w-md">
+                        {["你好，介绍一下你自己", "你能做什么？", "帮我写一段代码"].map((prompt) => (
+                          <button
+                            key={prompt}
+                            type="button"
+                            onClick={() => { setInput(prompt); }}
+                            className="text-xs px-3 py-1.5 rounded-full border border-slate-300 dark:border-slate-700/60 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:border-slate-400 dark:hover:border-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-all"
+                          >
+                            {prompt}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   ) : (
                     <>
@@ -425,29 +454,45 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
                   }
                 }}
                 placeholder={`Message ${role.name}...`}
-                className="flex-1 resize-none bg-transparent text-base outline-none min-h-[40px] max-h-[120px] py-2 text-slate-100 placeholder:text-slate-400"
+                className="flex-1 resize-none bg-transparent text-base outline-none min-h-[40px] max-h-[200px] py-2 text-slate-100 placeholder:text-slate-400"
                 style={{ height: "40px" }}
               />
 
-              {/* 发送按钮 */}
+              {/* 发送 / 停止生成按钮 */}
               <div className="pb-2">
-                <button
-                  type="button"
-                  onClick={send}
-                  disabled={isLoading || (!input.trim() && uploadedImages.length === 0 && textAttachments.length === 0)}
-                  className={cn(
-                    "w-9 h-9 rounded-full inline-flex items-center justify-center transition-all",
-                    "disabled:opacity-50 disabled:cursor-not-allowed",
-                    (!input.trim() && uploadedImages.length === 0 && textAttachments.length === 0) || isLoading
-                      ? "bg-slate-700 text-slate-400"
-                      : "bg-blue-600 hover:bg-blue-500 text-white hover:scale-105",
-                    sendButtonClassName
-                  )}
-                  title="发送"
-                  aria-label="发送消息"
-                >
-                  {isLoading ? <Loader2 size={18} className="animate-spin" /> : <ArrowUp size={20} strokeWidth={2.5} />}
-                </button>
+                {isLoading ? (
+                  <button
+                    type="button"
+                    onClick={cancelStream}
+                    className={cn(
+                      "w-9 h-9 rounded-full inline-flex items-center justify-center transition-all",
+                      "bg-red-600/80 hover:bg-red-500 text-white hover:scale-105",
+                      sendButtonClassName
+                    )}
+                    title="停止生成"
+                    aria-label="停止生成"
+                  >
+                    <Square size={16} fill="currentColor" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={send}
+                    disabled={!input.trim() && uploadedImages.length === 0 && textAttachments.length === 0}
+                    className={cn(
+                      "w-9 h-9 rounded-full inline-flex items-center justify-center transition-all",
+                      "disabled:opacity-50 disabled:cursor-not-allowed",
+                      !input.trim() && uploadedImages.length === 0 && textAttachments.length === 0
+                        ? "bg-slate-700 text-slate-400"
+                        : "bg-blue-600 hover:bg-blue-500 text-white hover:scale-105",
+                      sendButtonClassName
+                    )}
+                    title="发送"
+                    aria-label="发送消息"
+                  >
+                    <ArrowUp size={20} strokeWidth={2.5} />
+                  </button>
+                )}
               </div>
             </div>
           </div>
