@@ -160,6 +160,13 @@ export const api = {
     });
   },
 
+  /** 清空聊天的消息（保留聊天本身） */
+  async clearChatMessages(chatId: string): Promise<{ success: boolean; deleted: number }> {
+    return request<{ success: boolean; deleted: number }>(`${API_BASE_URL}/chats/${chatId}/messages`, {
+      method: 'DELETE',
+    });
+  },
+
   /** 获取聊天的消息 */
   async getChatMessages(chatId: string): Promise<Message[]> {
     const data = await request<MessagesResponse>(`${API_BASE_URL}/chats/${chatId}/messages`);

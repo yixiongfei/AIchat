@@ -238,6 +238,28 @@ router.delete("/:chatId", async (req, res) => {
 });
 
 /**
+ * 清空聊天的消息（保留聊天本身）
+ * DELETE /api/chats/:chatId/messages
+ */
+router.delete("/:chatId/messages", async (req, res) => {
+  const { chatId } = req.params;
+
+  try {
+    const [result] = await pool.query(
+      `DELETE FROM messages WHERE chat_id = ?`,
+      [chatId]
+    );
+
+    const deleted = (result as any).affectedRows;
+    console.log(`[Chat] Cleared ${deleted} messages for chat ${chatId}`);
+    res.json({ success: true, deleted });
+  } catch (error) {
+    console.error("Clear chat messages error:", error);
+    res.status(500).json({ error: "Failed to clear chat messages" });
+  }
+});
+
+/**
  * 获取聊天的消息
  * GET /api/chats/:chatId/messages
  */

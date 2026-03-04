@@ -385,20 +385,24 @@ export function useChatStream({
     console.log("已停止生成");
   }, [stopSpeak, setLoading]);
 
-  /** 清空历史 */
+  /** 清空历史（有 chatId 时只清当前会话，否则清全部） */
   const clearHistory = useCallback(async () => {
     if (!role?.id) return;
     const confirm = window.prompt("为防止误删,请输入 DELETE 确认清空历史");
     if (confirm !== "DELETE") return;
     try {
-      await api.deleteHistory(role.id);
+      if (chatId) {
+        await api.clearChatMessages(chatId);
+      } else {
+        await api.deleteHistory(role.id);
+      }
       setMessages([]);
       console.log("历史已清空");
     } catch (e) {
       console.error("Failed to delete history", e);
       console.error("清空失败");
     }
-  }, [role?.id]);
+  }, [role?.id, chatId]);
 
   /** 删除单条消息 */
   const deleteMessage = useCallback(async (messageId: string) => {
