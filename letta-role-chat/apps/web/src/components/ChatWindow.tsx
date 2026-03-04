@@ -454,7 +454,7 @@ export const ChatWindow = forwardRef<ChatWindowHandle, ChatWindowProps>(
                   }
                 }}
                 placeholder={`Message ${role.name}...`}
-                className="flex-1 resize-none bg-transparent text-base outline-none min-h-[40px] max-h-[200px] py-2 text-slate-100 placeholder:text-slate-400"
+                className="flex-1 resize-none bg-transparent text-base outline-none min-h-[40px] max-h-[200px] py-2 text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
                 style={{ height: "40px" }}
               />
 
