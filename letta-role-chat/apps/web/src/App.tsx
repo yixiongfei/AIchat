@@ -91,8 +91,34 @@ function AppInner() {
     setChatListKey((k) => k + 1);
   }, []);
 
+  // 检测 Electron 环境
+  const isElectron = !!(window as any).electronAPI?.isElectron;
+
   return (
-    <div className="flex h-screen overflow-hidden font-sans bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <div className="flex flex-col h-screen overflow-hidden font-sans bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      {/* Electron 无边框窗口拖拽栏 */}
+      {isElectron && (
+        <div
+          className="shrink-0 h-8 flex items-center justify-between px-2 bg-slate-100 dark:bg-slate-900 select-none"
+          style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+        >
+          <span className="text-xs text-slate-400 dark:text-slate-500 pl-1">Letta Chat</span>
+          <div className="flex items-center gap-1" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+            <button
+              onClick={() => (window as any).electronAPI?.minimize()}
+              className="w-6 h-6 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-slate-500 dark:text-slate-400 text-xs flex items-center justify-center"
+              title="最小化"
+            >─</button>
+            <button
+              onClick={() => (window as any).electronAPI?.close()}
+              className="w-6 h-6 rounded hover:bg-red-500 hover:text-white transition-colors text-slate-500 dark:text-slate-400 text-xs flex items-center justify-center"
+              title="关闭"
+            >✕</button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-1 overflow-hidden">
       {/* 移动端遮罩 */}
       {isMobile && sidebarOpen && (
         <div
@@ -261,6 +287,7 @@ function AppInner() {
 
       {/* ✅ 浮动按钮 - 直接传递 Context 中的 togglePanel */}
       <FloatingCodeButton togglePanel={togglePanel} />
+      </div>
     </div>
   );
 }

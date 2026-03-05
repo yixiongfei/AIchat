@@ -5,6 +5,7 @@ import os from "os";
 import roleRoutes from "./routes/roles";
 import messageRoutes from "./routes/messages";
 import chatRoutes from "./routes/chats";
+import translateRoutes from "./routes/translate";
 import { initDb } from "./storage/db";
 import "dotenv/config";
 import tts from "./routes/tts";
@@ -23,6 +24,7 @@ app.use('/api/avatars', express.static(avatarsDir));
 app.use("/api/roles", roleRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/chats", chatRoutes);
+app.use("/api", translateRoutes);
 
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error(err.stack);

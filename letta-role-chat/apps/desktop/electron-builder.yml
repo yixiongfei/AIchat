@@ -1,0 +1,31 @@
+appId: com.letta.chat.desktop
+productName: Letta Chat
+copyright: Copyright 2024
+
+directories:
+  output: release
+
+files:
+  - dist/**/*
+  - package.json
+
+# 打包时将 web 前端构建产物复制进来
+extraResources:
+  - from: ../web/dist
+    to: web
+    filter:
+      - "**/*"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: icon.ico
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Letta Chat
