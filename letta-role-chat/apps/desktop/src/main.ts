@@ -12,7 +12,7 @@ import {
 } from "electron";
 import * as path from "path";
 import { translateText } from "./translate";
-
+import { keyboard, Key, sleep } from "@nut-tree-fork/nut-js";
 // ========================================
 // 配置
 // ========================================
@@ -36,16 +36,18 @@ let isQuitting = false; // 标记是否正在退出（而非隐藏到托盘）
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 420,
-    height: 620,
+    height: 640,
     minWidth: 320,
-    minHeight: 400,
-    frame: false,           // 无边框
-    alwaysOnTop: true,      // 始终置顶
-    resizable: true,        // 可拖拽缩放
-    skipTaskbar: false,     // 在任务栏显示
-    show: true,
+    minHeight: 420,
+    useContentSize: true,
+    frame: false,
+    thickFrame: false,        // ✅ 打开它（仅 Windows 有效）
+    alwaysOnTop: true,
+    resizable: true,
+    skipTaskbar: false,
+    show: false,
     transparent: false,
-    backgroundColor: "#0f172a", // slate-900 背景
+    backgroundColor: "#0f172a",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -159,6 +161,22 @@ function createTray(): void {
 // 全局快捷键
 // ========================================
 
+function detectLang(text: string): "ja" | "zh" | "other" {
+  const hasKana = /[\u3040-\u30ff]/.test(text);   // 平假名/片假名 => 日语强特征
+  const hasCJK  = /[\u4e00-\u9fff]/.test(text);   // 汉字（中日共用）
+
+  if (hasKana) return "ja";
+  if (hasCJK) return "zh";
+  return "other";
+}
+
+/** 根据源语言决定目标语言 */
+function getTargetLang(src: "ja" | "zh" | "other"): string | null {
+  if (src === "ja") return "zh"; // 或 "zh-CN"（看你后端支持哪个）
+  if (src === "zh") return "ja";
+  return null;
+}
+
 function registerShortcuts(): void {
   // Alt+Space → 切换聊天窗口 显示/隐藏
   globalShortcut.register("Alt+Space", () => {
@@ -171,35 +189,63 @@ function registerShortcuts(): void {
     }
   });
 
-  // Ctrl+Shift+T → 翻译剪贴板中文 → 日文
-  globalShortcut.register("Ctrl+Shift+T", async () => {
-    const text = clipboard.readText().trim();
-    if (!text) {
-      showNotification("翻译", "剪贴板为空");
-      return;
-    }
-
-    // 检查是否包含中文
-    if (!/[\u4e00-\u9fff]/.test(text)) {
-      showNotification("翻译", "剪贴板内容不包含中文");
-      return;
-    }
-
-    showNotification("翻译中...", text.slice(0, 50) + (text.length > 50 ? "..." : ""));
-
+ 
+  // ✅ Ctrl+B → 自动 Ctrl+C → 翻译选中文本（剪贴板）
+  globalShortcut.register("Control+B", async () => {
     try {
-      const result = await translateText(text, "ja", API_BASE);
-      // 写回剪贴板
-      clipboard.writeText(result);
-      showNotification("翻译完成（已复制）", result);
+      // 1) 记录旧剪贴板（可选：避免无选中文本时污染）
+      const prev = clipboard.readText();
 
-      // 通知渲染进程（可选）
-      mainWindow?.webContents.send("translate-result", { original: text, translated: result });
+      // 2) 模拟 Ctrl+C（复制当前选中文本）
+      await keyboard.pressKey(Key.LeftControl, Key.C);
+      await keyboard.releaseKey(Key.C, Key.LeftControl);
+
+      // 3) 等待系统把选中内容写入剪贴板
+      await sleep(120);
+
+      // 4) 读取新的剪贴板
+      const text = clipboard.readText().trim();
+
+      // 没复制到内容：恢复旧剪贴板并提示
+      if (!text || text === prev) {
+        showNotification("翻译", "未检测到选中文本（请先选中内容）");
+        return;
+      }
+
+     
+    // ✅ 自动识别语言并决定目标语言
+    const src = detectLang(text);
+    const target = getTargetLang(src);
+
+    if (!target) {
+      showNotification("翻译", "未识别到中文/日文（请选中文本）");
+      return;
+    }
+
+    showNotification(
+      src === "ja" ? "检测到日语 → 翻译成中文..." : "检测到中文 → 翻译成日语...",
+      text.slice(0, 50) + (text.length > 50 ? "..." : "")
+    );
+
+    // ✅ 双向翻译：ja -> zh / zh -> ja
+    const result = await translateText(text, target, API_BASE);
+
+    clipboard.writeText(result);
+    showNotification("翻译完成（已复制）", result);
+
+    mainWindow?.webContents.send("translate-result", {
+      original: text,
+      translated: result,
+      from: src,
+      to: target,
+    });
+
     } catch (err: any) {
-      showNotification("翻译失败", err.message || "请检查后端是否运行");
+      showNotification("翻译失败", err?.message || "请检查权限/后端是否运行");
     }
   });
 }
+
 
 // ========================================
 // 系统通知
@@ -241,7 +287,7 @@ if (!gotLock) {
       mainWindow.focus();
     }
   });
-
+  
   app.whenReady().then(() => {
     createWindow();
     try {

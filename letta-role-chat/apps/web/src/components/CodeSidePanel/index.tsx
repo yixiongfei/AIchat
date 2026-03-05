@@ -110,7 +110,7 @@ export function CodeSidePanel({
   return (
     <aside
       className={[
-        "fixed top-0 right-0 z-50 h-screen",
+        "fixed top-0 right-0 z-50 h-full min-h-0",
         "transition-transform duration-200 ease-out",
         "flex flex-col backdrop-blur",
         "bg-white/95 border-l border-slate-200/70 text-slate-900",

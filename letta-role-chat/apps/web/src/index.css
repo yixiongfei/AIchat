@@ -6,6 +6,11 @@
   html, body, #root {
     height: 100%;
   }
+  
+  .app {
+    min-height: 100%;   /* ✔ Electron 下最稳定 */
+    height: 100%;       /* ✔ 等于真正的内容高度，不会超出窗口 */
+  }
 
   body {
     @apply bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100;
@@ -31,6 +36,17 @@
     font-variant-ligatures: none;
   }
 }
+
+
+@layer utilities {
+  .app-drag {
+    -webkit-app-region: drag;
+  }
+  .app-no-drag {
+    -webkit-app-region: no-drag;
+  }
+}
+
 
 /* Ensure form controls inherit text color and placeholders are readable */
 textarea, input, select, button {

@@ -95,7 +95,7 @@ function AppInner() {
   const isElectron = !!(window as any).electronAPI?.isElectron;
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden font-sans bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <div className="flex flex-col h-full min-h-0 overflow-hidden font-sans bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       {/* Electron 无边框窗口拖拽栏 */}
       {isElectron && (
         <div
@@ -139,11 +139,11 @@ function AppInner() {
         style={!isMobile ? { width: `${sidebarWidth}px` } : undefined}
       >
         {/* 顶部按钮栏 */}
-        <div className="p-2 border-b border-slate-200 flex items-center justify-center gap-2 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <div className="p-2 border-b border-slate-200 flex items-center justify-center gap-2 app-no-drag bg-white dark:border-slate-800 dark:bg-slate-900" >
           {isMobile && (
             <button
               onClick={() => setSidebarOpen(false)}
-              className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-600 dark:text-slate-300 md:hidden"
+              className="p-2 rounded-full app-no-drag hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-600 dark:text-slate-300 md:hidden"
               title="关闭侧边栏"
             >
               <X size={20} />
@@ -152,7 +152,7 @@ function AppInner() {
 
           <button
             onClick={toggleTheme}
-            className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-600 dark:text-slate-300"
+            className="p-2 rounded-full app-no-drag hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-600 dark:text-slate-300"
             title={isDark ? "切换到亮色" : "切换到暗色"}
           >
             {isDark ? <Sun size={20} /> : <Moon size={20} />}
@@ -216,7 +216,7 @@ function AppInner() {
 
       {/* 右侧聊天区 */}
       <aside
-        className="flex-1 min-w-0 h-screen border-l border-slate-200 bg-white text-slate-900 dark:border-slate-800/60 dark:bg-slate-950 dark:text-slate-100 relative flex flex-col"
+        className="flex-1 min-w-0 h-full min-h-0 border-l border-slate-200 bg-white text-slate-900 dark:border-slate-800/60 dark:bg-slate-950 dark:text-slate-100 relative flex flex-col"
         style={{
           marginRight: !isMobile && codeOpen ? `${codeWidth}px` : undefined,
         }}

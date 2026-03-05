@@ -1,21 +1,22 @@
 {
   "name": "@letta-role-chat/desktop",
   "version": "1.0.0",
-  "description": "Letta Chat Desktop - Windows 桌面端 AI 聊天工具",
+  "description": "Letta Chat Desktop",
   "main": "dist/main.js",
   "scripts": {
-    "dev": "tsc && electron dist/main.js --dev",
+    "dev": "tsc & electron dist/main.js --dev",
     "build": "tsc && electron-builder",
     "compile": "tsc"
   },
   "dependencies": {
+    "@nut-tree-fork/nut-js": "^4.2.6",
     "node-fetch": "^2.7.0"
   },
   "devDependencies": {
-    "electron": "^33.0.0",
-    "electron-builder": "^25.1.0",
     "@types/node": "^20.10.0",
     "@types/node-fetch": "^2.6.11",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.0",
     "typescript": "^5.3.2"
   }
 }
