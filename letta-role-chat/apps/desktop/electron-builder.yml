@@ -14,23 +14,23 @@ files:
   - dist/**/*
   - package.json
 
-# 打包时将 web 前端构建产物复制进来
+# 打包时将 web 前端构建产物和托盘图标复制进来
 extraResources:
   - from: ../web/dist
     to: web
     filter:
       - "**/*"
+  - from: microsoft_teams_alt_macos_bigsur_icon_189962.ico
+    to: ../microsoft_teams_alt_macos_bigsur_icon_189962.ico
 
-# 跳过代码签名（个人/内部使用不需要）
+# 完全跳过代码签名（个人/内部使用）
+forceCodeSigning: false
+
 win:
-  signingHashAlgorithms: []
-  sign: null
+  signAndEditExecutable: false
+  signtoolOptions: {}
   target:
-    - target: portable
+    - target: dir
       arch:
         - x64
   icon: icon.ico
-
-# portable 免安装版（双击直接运行，不需要安装）
-portable:
-  artifactName: "LettaChat-${version}-portable.exe"

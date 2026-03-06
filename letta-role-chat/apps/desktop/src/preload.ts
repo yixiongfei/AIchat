@@ -1,9 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
 
-/**
- * 通过 contextBridge 安全地暴露 API 给渲染进程
- * 渲染进程通过 window.electronAPI 调用
- */
 contextBridge.exposeInMainWorld("electronAPI", {
   /** 标识当前运行在 Electron 中 */
   isElectron: true,
@@ -11,11 +7,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
   /** 窗口控制 */
   minimize: () => ipcRenderer.send("window-minimize"),
   close: () => ipcRenderer.send("window-close"),
+  maximize: () => ipcRenderer.send("window-maximize"),
   toggleAlwaysOnTop: () => ipcRenderer.send("window-toggle-top"),
 
-  /** 监听置顶状态变化 */
+  /** 监听窗口状态变化 */
   onAlwaysOnTopChanged: (callback: (isTop: boolean) => void) => {
     ipcRenderer.on("always-on-top-changed", (_event, isTop) => callback(isTop));
+  },
+  onMaximizedChanged: (callback: (isMaximized: boolean) => void) => {
+    ipcRenderer.on("maximized-changed", (_event, isMax) => callback(isMax));
   },
 
   /** 监听翻译结果 */

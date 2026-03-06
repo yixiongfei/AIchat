@@ -9,10 +9,12 @@ import {
   ipcMain,
   nativeImage,
   NativeImage,
+  screen,
 } from "electron";
 import * as path from "path";
 import { translateText } from "./translate";
 import { keyboard, Key, sleep } from "@nut-tree-fork/nut-js";
+
 // ========================================
 // 配置
 // ========================================
@@ -21,31 +23,56 @@ const IS_DEV = process.argv.includes("--dev");
 const DEV_URL = process.env.VITE_DEV_URL || "http://localhost:5173";
 const API_BASE = process.env.API_BASE_URL || "http://localhost:3001";
 
+const DEFAULT_WIDTH = 420;
+const DEFAULT_HEIGHT = 640;
+const EDGE_THRESHOLD = 10;      // 贴边检测像素
+const PEEK_SIZE = 4;            // 隐藏后露出的像素条
+const MOUSE_POLL_MS = 100;      // 鼠标位置轮询间隔
+const ANIM_DURATION = 220;      // 滑动动画时长(ms)
+const ANIM_FPS = 60;            // 动画帧率
+const LEAVE_DELAY_MS = 400;     // 鼠标离开后延迟隐藏(ms)，防止抖动
+const COOLDOWN_MS = 600;        // 动画结束后冷却时间(ms)，防止连续触发
+
 // ========================================
 // 全局变量
 // ========================================
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
-let isQuitting = false; // 标记是否正在退出（而非隐藏到托盘）
+let isQuitting = false;
+
+// 贴边停靠状态机: normal → docked-hidden ⇄ docked-visible
+type DockState = "normal" | "docked-hidden" | "docked-visible";
+let dockState: DockState = "normal";
+let dockedEdge: "top" | "left" | "right" | null = null;
+let savedBounds: Electron.Rectangle | null = null;  // 贴边前的原始位置
+let hiddenBounds: Electron.Rectangle | null = null;  // 隐藏时的位置（只露出 PEEK_SIZE）
+let mousePoller: ReturnType<typeof setInterval> | null = null;
+let leaveTimer: ReturnType<typeof setTimeout> | null = null;
+let isAnimating = false;
+let lastAnimEnd = 0;  // 上次动画结束时间戳，用于冷却
 
 // ========================================
-// 窗口创建
+// 窗口创建（启动后自动弹出，定位右上角）
 // ========================================
 
 function createWindow(): void {
+  const { width: screenW } = screen.getPrimaryDisplay().workAreaSize;
+
   mainWindow = new BrowserWindow({
-    width: 420,
-    height: 640,
+    width: DEFAULT_WIDTH,
+    height: DEFAULT_HEIGHT,
+    x: screenW - DEFAULT_WIDTH - 20,
+    y: 20,
     minWidth: 320,
     minHeight: 420,
     useContentSize: true,
     frame: false,
-    thickFrame: false,        // ✅ 打开它（仅 Windows 有效）
+    thickFrame: false,
     alwaysOnTop: true,
     resizable: true,
     skipTaskbar: false,
-    show: false,
+    show: true,
     transparent: false,
     backgroundColor: "#0f172a",
     webPreferences: {
@@ -55,18 +82,13 @@ function createWindow(): void {
     },
   });
 
-  // 加载页面
   if (IS_DEV) {
     mainWindow.loadURL(DEV_URL);
-    // 开发模式：打开 DevTools 方便调试
     mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
-    // 生产模式：加载打包的前端文件
-    const webPath = path.join(process.resourcesPath, "web", "index.html");
-    mainWindow.loadFile(webPath);
+    mainWindow.loadFile(path.join(process.resourcesPath, "web", "index.html"));
   }
 
-  // 关闭按钮 → 隐藏到托盘（不退出）
   mainWindow.on("close", (e) => {
     if (!isQuitting) {
       e.preventDefault();
@@ -76,79 +98,279 @@ function createWindow(): void {
 
   mainWindow.on("closed", () => {
     mainWindow = null;
+    stopMousePoller();
+    clearLeaveTimer();
   });
+
+  // 通知渲染进程最大化状态变化；最大化时脱离停靠
+  mainWindow.on("maximize", () => {
+    if (dockState !== "normal") undock();
+    mainWindow?.webContents.send("maximized-changed", true);
+  });
+  mainWindow.on("unmaximize", () => {
+    mainWindow?.webContents.send("maximized-changed", false);
+  });
+
+  // 窗口移动结束后检测是否贴边
+  mainWindow.on("moved", () => checkEdgeDock());
+}
+
+// ========================================
+// 平滑动画工具
+// ========================================
+
+/** easeOutCubic 缓动函数 */
+function easeOutCubic(t: number): number {
+  return 1 - Math.pow(1 - t, 3);
+}
+
+/** 平滑动画移动窗口 */
+function animateBounds(
+  from: Electron.Rectangle,
+  to: Electron.Rectangle,
+  onDone?: () => void
+): void {
+  if (!mainWindow) { onDone?.(); return; }
+
+  isAnimating = true;
+  const totalFrames = Math.max(1, Math.round((ANIM_DURATION / 1000) * ANIM_FPS));
+  let frame = 0;
+
+  const timer = setInterval(() => {
+    frame++;
+    const progress = easeOutCubic(frame / totalFrames);
+
+    const current = {
+      x: Math.round(from.x + (to.x - from.x) * progress),
+      y: Math.round(from.y + (to.y - from.y) * progress),
+      width: Math.round(from.width + (to.width - from.width) * progress),
+      height: Math.round(from.height + (to.height - from.height) * progress),
+    };
+
+    mainWindow?.setBounds(current);
+
+    if (frame >= totalFrames) {
+      clearInterval(timer);
+      mainWindow?.setBounds(to);  // 确保精确到终点
+      isAnimating = false;
+      onDone?.();
+    }
+  }, Math.round(1000 / ANIM_FPS));
+}
+
+// ========================================
+// 贴边停靠（状态机 + 滑动动画 + 防抖）
+// ========================================
+
+/** 是否在冷却期内 */
+function inCooldown(): boolean {
+  return Date.now() - lastAnimEnd < COOLDOWN_MS;
+}
+
+/** 计算隐藏位置（只露出 PEEK_SIZE 像素） */
+function calcHiddenBounds(
+  edge: "top" | "left" | "right",
+  bounds: Electron.Rectangle,
+  workArea: Electron.Rectangle
+): Electron.Rectangle {
+  const target = { ...bounds };
+  if (edge === "top") {
+    target.y = workArea.y - bounds.height + PEEK_SIZE;
+  } else if (edge === "left") {
+    target.x = workArea.x - bounds.width + PEEK_SIZE;
+  } else {
+    target.x = workArea.x + workArea.width - PEEK_SIZE;
+  }
+  return target;
+}
+
+/** 鼠标是否在窗口附近 */
+function isCursorNearWindow(pad: number): boolean {
+  if (!mainWindow) return false;
+  const cursor = screen.getCursorScreenPoint();
+  const win = mainWindow.getBounds();
+  return (
+    cursor.x >= win.x - pad &&
+    cursor.x <= win.x + win.width + pad &&
+    cursor.y >= win.y - pad &&
+    cursor.y <= win.y + win.height + pad
+  );
+}
+
+/** 1) 拖动窗口后检测是否贴边 → 进入 docked-hidden */
+function checkEdgeDock(): void {
+  if (!mainWindow || mainWindow.isMaximized() || dockState !== "normal" || isAnimating) return;
+
+  const bounds = mainWindow.getBounds();
+  const workArea = screen.getDisplayMatching(bounds).workArea;
+
+  let edge: "top" | "left" | "right" | null = null;
+  if (bounds.y <= workArea.y + EDGE_THRESHOLD) {
+    edge = "top";
+  } else if (bounds.x <= workArea.x + EDGE_THRESHOLD) {
+    edge = "left";
+  } else if (bounds.x + bounds.width >= workArea.x + workArea.width - EDGE_THRESHOLD) {
+    edge = "right";
+  }
+
+  if (!edge) return;
+
+  // 记住原始位置和边缘方向
+  savedBounds = { ...bounds };
+  dockedEdge = edge;
+  hiddenBounds = calcHiddenBounds(edge, bounds, workArea);
+
+  // 滑出隐藏
+  slideToHidden();
+}
+
+/** 2) 滑动到隐藏位置 */
+function slideToHidden(): void {
+  if (!mainWindow || !hiddenBounds || isAnimating) return;
+
+  const from = mainWindow.getBounds();
+  animateBounds(from, hiddenBounds, () => {
+    dockState = "docked-hidden";
+    lastAnimEnd = Date.now();
+    startMousePoller();
+  });
+}
+
+/** 3) 滑动到可见位置（恢复到原始大小位置） */
+function slideToVisible(): void {
+  if (!mainWindow || !savedBounds || isAnimating) return;
+
+  clearLeaveTimer();
+  const from = mainWindow.getBounds();
+  animateBounds(from, savedBounds, () => {
+    dockState = "docked-visible";
+    lastAnimEnd = Date.now();
+    // 不清除 poller，继续监测鼠标离开
+  });
+}
+
+/** 4) 完全脱离停靠（比如用户在可见状态下拖走窗口） */
+function undock(): void {
+  dockState = "normal";
+  dockedEdge = null;
+  savedBounds = null;
+  hiddenBounds = null;
+  stopMousePoller();
+  clearLeaveTimer();
+}
+
+/** 鼠标轮询：根据 dockState 决定恢复还是隐藏 */
+function startMousePoller(): void {
+  stopMousePoller();
+  mousePoller = setInterval(() => {
+    if (!mainWindow || isAnimating || inCooldown()) return;
+
+    if (dockState === "docked-hidden") {
+      // 鼠标靠近 → 恢复可见
+      if (isCursorNearWindow(20)) {
+        slideToVisible();
+      }
+    } else if (dockState === "docked-visible") {
+      // 鼠标远离 → 延迟隐藏
+      if (!isCursorNearWindow(30)) {
+        scheduleLeaveHide();
+      } else {
+        // 鼠标回来了，取消延迟隐藏
+        clearLeaveTimer();
+      }
+    }
+  }, MOUSE_POLL_MS);
+}
+
+function stopMousePoller(): void {
+  if (mousePoller) {
+    clearInterval(mousePoller);
+    mousePoller = null;
+  }
+}
+
+/** 延迟隐藏（鼠标离开后等一小段时间再隐藏，防止抖动） */
+function scheduleLeaveHide(): void {
+  if (leaveTimer) return; // 已有计划中的隐藏
+  leaveTimer = setTimeout(() => {
+    leaveTimer = null;
+    if (dockState !== "docked-visible" || isAnimating || inCooldown()) return;
+    // 再次确认鼠标确实离开了
+    if (!isCursorNearWindow(30)) {
+      slideToHidden();
+    }
+  }, LEAVE_DELAY_MS);
+}
+
+function clearLeaveTimer(): void {
+  if (leaveTimer) {
+    clearTimeout(leaveTimer);
+    leaveTimer = null;
+  }
+}
+
+/** 从外部调用恢复窗口（托盘点击、快捷键等） */
+function restoreFromDock(): void {
+  if (dockState === "normal") return;
+  if (isAnimating) return;
+
+  clearLeaveTimer();
+  stopMousePoller();
+
+  if (mainWindow && savedBounds) {
+    mainWindow.setBounds(savedBounds);
+  }
+
+  undock();
+  mainWindow?.show();
+  mainWindow?.focus();
 }
 
 // ========================================
 // 系统托盘
 // ========================================
 
+const TRAY_ICON_NAME = "microsoft_teams_alt_macos_bigsur_icon_189962.ico";
+
 function createTray(): void {
-  // 尝试加载图标文件，按优先级查找
   const iconCandidates = IS_DEV
     ? [
+        path.join(__dirname, "..", TRAY_ICON_NAME),
         path.join(__dirname, "..", "icon.ico"),
-        path.join(__dirname, "..", "icon.png"),
       ]
     : [
+        path.join(process.resourcesPath, "..", TRAY_ICON_NAME),
+        path.join(process.resourcesPath, TRAY_ICON_NAME),
         path.join(process.resourcesPath, "..", "icon.ico"),
         path.join(process.resourcesPath, "icon.ico"),
       ];
 
   let trayIcon: NativeImage | null = null;
-
-  for (const iconPath of iconCandidates) {
+  for (const p of iconCandidates) {
     try {
-      const img = nativeImage.createFromPath(iconPath);
-      if (!img.isEmpty()) {
-        trayIcon = img;
-        break;
-      }
-    } catch {
-      // 继续尝试下一个
-    }
+      const img = nativeImage.createFromPath(p);
+      if (!img.isEmpty()) { trayIcon = img; break; }
+    } catch { /* next */ }
   }
 
-  // 如果所有图标都没找到，创建一个 16x16 的默认图标
   if (!trayIcon || trayIcon.isEmpty()) {
-    // 创建一个简单的 16x16 蓝色方块作为默认托盘图标
-    const size = 16;
-    const canvas = Buffer.alloc(size * size * 4); // RGBA
-    for (let i = 0; i < size * size; i++) {
-      canvas[i * 4 + 0] = 59;   // R (蓝色色调)
-      canvas[i * 4 + 1] = 130;  // G
-      canvas[i * 4 + 2] = 246;  // B
-      canvas[i * 4 + 3] = 255;  // A
-    }
-    trayIcon = nativeImage.createFromBuffer(canvas, { width: size, height: size });
+    const s = 16, buf = Buffer.alloc(s * s * 4);
+    for (let i = 0; i < s * s; i++) { buf[i*4]=59; buf[i*4+1]=130; buf[i*4+2]=246; buf[i*4+3]=255; }
+    trayIcon = nativeImage.createFromBuffer(buf, { width: s, height: s });
   }
 
   tray = new Tray(trayIcon);
   tray.setToolTip("Letta Chat");
-
-  const contextMenu = Menu.buildFromTemplate([
-    {
-      label: "显示窗口",
-      click: () => {
-        mainWindow?.show();
-        mainWindow?.focus();
-      },
-    },
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: "Show", click: () => { restoreFromDock(); mainWindow?.show(); mainWindow?.focus(); } },
     { type: "separator" },
-    {
-      label: "退出",
-      click: () => {
-        isQuitting = true;
-        app.quit();
-      },
-    },
-  ]);
+    { label: "Quit", click: () => { isQuitting = true; app.quit(); } },
+  ]));
 
-  tray.setContextMenu(contextMenu);
-
-  // 左键点击 → 切换显示/隐藏
   tray.on("click", () => {
-    if (mainWindow?.isVisible()) {
+    if (dockState !== "normal") {
+      restoreFromDock();
+    } else if (mainWindow?.isVisible()) {
       mainWindow.hide();
     } else {
       mainWindow?.show();
@@ -162,94 +384,48 @@ function createTray(): void {
 // ========================================
 
 function detectLang(text: string): "ja" | "zh" | "other" {
-  const hasKana = /[\u3040-\u30ff]/.test(text);   // 平假名/片假名 => 日语强特征
-  const hasCJK  = /[\u4e00-\u9fff]/.test(text);   // 汉字（中日共用）
-
-  if (hasKana) return "ja";
-  if (hasCJK) return "zh";
+  if (/[\u3040-\u30ff]/.test(text)) return "ja";
+  if (/[\u4e00-\u9fff]/.test(text)) return "zh";
   return "other";
 }
 
-/** 根据源语言决定目标语言 */
 function getTargetLang(src: "ja" | "zh" | "other"): string | null {
-  if (src === "ja") return "zh"; // 或 "zh-CN"（看你后端支持哪个）
+  if (src === "ja") return "zh";
   if (src === "zh") return "ja";
   return null;
 }
 
 function registerShortcuts(): void {
-  // Alt+Space → 切换聊天窗口 显示/隐藏
   globalShortcut.register("Alt+Space", () => {
     if (!mainWindow) return;
-    if (mainWindow.isVisible()) {
-      mainWindow.hide();
-    } else {
-      mainWindow.show();
-      mainWindow.focus();
-    }
+    if (dockState !== "normal") { restoreFromDock(); }
+    else if (mainWindow.isVisible()) mainWindow.hide();
+    else { mainWindow.show(); mainWindow.focus(); }
   });
 
- 
-  // ✅ Ctrl+B → 自动 Ctrl+C → 翻译选中文本（剪贴板）
   globalShortcut.register("Control+B", async () => {
     try {
-      // 1) 记录旧剪贴板（可选：避免无选中文本时污染）
       const prev = clipboard.readText();
-
-      // 2) 模拟 Ctrl+C（复制当前选中文本）
       await keyboard.pressKey(Key.LeftControl, Key.C);
       await keyboard.releaseKey(Key.C, Key.LeftControl);
-
-      // 3) 等待系统把选中内容写入剪贴板
       await sleep(120);
-
-      // 4) 读取新的剪贴板
       const text = clipboard.readText().trim();
+      if (!text || text === prev) { showNotification("Translate", "No text selected"); return; }
 
-      // 没复制到内容：恢复旧剪贴板并提示
-      if (!text || text === prev) {
-        showNotification("翻译", "未检测到选中文本（请先选中内容）");
-        return;
-      }
+      const src = detectLang(text);
+      const target = getTargetLang(src);
+      if (!target) { showNotification("Translate", "Not ZH/JA text"); return; }
 
-     
-    // ✅ 自动识别语言并决定目标语言
-    const src = detectLang(text);
-    const target = getTargetLang(src);
-
-    if (!target) {
-      showNotification("翻译", "未识别到中文/日文（请选中文本）");
-      return;
-    }
-
-    showNotification(
-      src === "ja" ? "检测到日语 → 翻译成中文..." : "检测到中文 → 翻译成日语...",
-      text.slice(0, 50) + (text.length > 50 ? "..." : "")
-    );
-
-    // ✅ 双向翻译：ja -> zh / zh -> ja
-    const result = await translateText(text, target, API_BASE);
-
-    clipboard.writeText(result);
-    showNotification("翻译完成（已复制）", result);
-
-    mainWindow?.webContents.send("translate-result", {
-      original: text,
-      translated: result,
-      from: src,
-      to: target,
-    });
-
+      showNotification(src === "ja" ? "JA -> ZH ..." : "ZH -> JA ...", text.slice(0, 50));
+      const result = await translateText(text, target, API_BASE);
+      clipboard.writeText(result);
+      showNotification("Done (copied)", result);
+      mainWindow?.webContents.send("translate-result", { original: text, translated: result, from: src, to: target });
     } catch (err: any) {
-      showNotification("翻译失败", err?.message || "请检查权限/后端是否运行");
+      showNotification("Translate failed", err?.message || "Check backend");
     }
   });
 }
-
-
-// ========================================
-// 系统通知
-// ========================================
 
 function showNotification(title: string, body: string): void {
   new Notification({ title, body, silent: true }).show();
@@ -260,9 +436,12 @@ function showNotification(title: string, body: string): void {
 // ========================================
 
 function setupIPC(): void {
-  // 窗口控制（给无边框窗口的自定义标题栏用）
   ipcMain.on("window-minimize", () => mainWindow?.minimize());
   ipcMain.on("window-close", () => mainWindow?.hide());
+  ipcMain.on("window-maximize", () => {
+    if (!mainWindow) return;
+    mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize();
+  });
   ipcMain.on("window-toggle-top", () => {
     if (!mainWindow) return;
     const isTop = mainWindow.isAlwaysOnTop();
@@ -275,47 +454,28 @@ function setupIPC(): void {
 // App 生命周期
 // ========================================
 
-// 单实例锁定：防止多开
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    // 如果用户尝试打开第二个实例，聚焦到已有窗口
     if (mainWindow) {
+      if (dockState !== "normal") restoreFromDock();
       mainWindow.show();
       mainWindow.focus();
     }
   });
-  
+
   app.whenReady().then(() => {
     createWindow();
-    try {
-      createTray();
-    } catch (err) {
-      console.error("创建系统托盘失败（不影响主窗口）:", err);
-    }
+    try { createTray(); } catch (err) { console.error("Tray failed:", err); }
     registerShortcuts();
     setupIPC();
-    console.log("Letta Chat Desktop 启动成功！");
-    console.log(`模式: ${IS_DEV ? "开发" : "生产"}`);
-    console.log(`前端: ${IS_DEV ? DEV_URL : "本地文件"}`);
-    console.log(`API: ${API_BASE}`);
+    console.log(`Letta Chat Desktop | ${IS_DEV ? "DEV" : "PROD"} | API: ${API_BASE}`);
   });
 
-  app.on("before-quit", () => {
-    isQuitting = true;
-  });
-
-  app.on("will-quit", () => {
-    globalShortcut.unregisterAll();
-  });
-
-  app.on("window-all-closed", () => {
-    // Windows：关闭所有窗口时不退出（因为有托盘）
-  });
-
-  app.on("activate", () => {
-    if (!mainWindow) createWindow();
-  });
+  app.on("before-quit", () => { isQuitting = true; });
+  app.on("will-quit", () => { globalShortcut.unregisterAll(); stopMousePoller(); clearLeaveTimer(); });
+  app.on("window-all-closed", () => { /* tray keeps alive */ });
+  app.on("activate", () => { if (!mainWindow) createWindow(); });
 }

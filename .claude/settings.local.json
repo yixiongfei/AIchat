@@ -17,7 +17,10 @@
       "Bash(dir \"C:\\\\Users\\\\yi.xiongfei\\\\AppData\\\\Local\\\\electron-builder\\\\Cache\\\\winCodeSign\\\\834792019\\\\windows-10\" /b)",
       "Bash(set WIN_CSC_LINK=)",
       "Bash(set ELECTRON_BUILDER_CACHE=C:Usersyi.xiongfeiAppDataLocalelectron-builderCache)",
-      "Bash(npx asar pack dist releasewin-unpackedresourcesapp.asar)"
+      "Bash(npx asar pack dist releasewin-unpackedresourcesapp.asar)",
+      "Bash(python3 -c \" import sys, json for line in sys.stdin: try: obj = json.loads\\(line.strip\\(\\)\\) if obj.get\\(''type''\\) == ''assistant'': msg = obj.get\\(''message'', {}\\) content = msg.get\\(''content'', []\\) for c in content: if isinstance\\(c, dict\\) and c.get\\(''type''\\) == ''text'': print\\(''ASSISTANT TEXT:'', c[''text''][:500]\\) elif isinstance\\(c, dict\\) and c.get\\(''type''\\) == ''tool_use'': print\\(''TOOL USE:'', c.get\\(''name''\\), json.dumps\\(c.get\\(''input'', {}\\)\\)[:300]\\) elif obj.get\\(''type''\\) == ''user'': msg = obj.get\\(''message'', {}\\) content = msg.get\\(''content'', []\\) if isinstance\\(content, str\\): print\\(''USER:'', content[:300]\\) elif isinstance\\(content, list\\): for c in content: if isinstance\\(c, dict\\) and c.get\\(''type''\\) == ''text'': print\\(''USER TEXT:'', c[''text''][:300]\\) elif isinstance\\(c, dict\\) and c.get\\(''type''\\) == ''tool_result'': print\\(''TOOL RESULT:'', str\\(c.get\\(''content'', ''''\\)\\)[:200]\\) except: pass \")",
+      "Bash(python3 -c \":*)",
+      "Bash(docker compose -f \"C:/Users/yi.xiongfei/Desktop/MyFiles/AIchat/letta-role-chat-cloud/letta-role-chat/Docker/docker-compose.yml\" ps)"
     ]
   }
 }

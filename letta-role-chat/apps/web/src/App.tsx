@@ -1,5 +1,5 @@
-import { useRef, useState, useCallback } from "react";
-import { RefreshCw, Moon, Sun, X } from "lucide-react";
+import { useRef, useState, useCallback, useEffect } from "react";
+import { RefreshCw, Moon, Sun, X, Maximize2, Minimize2 } from "lucide-react";
 
 import { RoleList } from "./components/RoleList";
 import { RoleEditor } from "./components/RoleEditor";
@@ -23,9 +23,20 @@ import { api } from "./services/api";
 function AppInner() {
   // 检测 Electron 环境（需要在其他 hooks 之前）
   const isElectron = !!(window as any).electronAPI?.isElectron;
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  // 监听 Electron 窗口最大化状态变化
+  useEffect(() => {
+    if (!isElectron) return;
+    const api = (window as any).electronAPI;
+    api?.onMaximizedChanged?.((maximized: boolean) => {
+      setIsMaximized(maximized);
+    });
+  }, [isElectron]);
+
   const isMobile = useIsMobile(768);
   const { isDark, toggleTheme } = useTheme();
-  useLive2D(isMobile);
+  useLive2D(isMobile, isElectron && isMaximized);
 
   const { width: sidebarWidth, startResize } = useResizableSidebar({
     storageKey: "sidebarWidth",
@@ -107,14 +118,25 @@ function AppInner() {
           <div className="flex items-center gap-1" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
             <button
               onClick={() => (window as any).electronAPI?.minimize()}
-              className="w-6 h-6 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-slate-500 dark:text-slate-400 text-xs flex items-center justify-center"
+              className="w-6 h-6 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-slate-500 dark:text-slate-400 flex items-center justify-center"
               title="最小化"
-            >─</button>
+            >
+              <svg width="10" height="1" viewBox="0 0 10 1"><rect width="10" height="1" fill="currentColor"/></svg>
+            </button>
+            <button
+              onClick={() => (window as any).electronAPI?.maximize()}
+              className="w-6 h-6 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-slate-500 dark:text-slate-400 flex items-center justify-center"
+              title={isMaximized ? "还原" : "最大化"}
+            >
+              {isMaximized ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+            </button>
             <button
               onClick={() => (window as any).electronAPI?.close()}
-              className="w-6 h-6 rounded hover:bg-red-500 hover:text-white transition-colors text-slate-500 dark:text-slate-400 text-xs flex items-center justify-center"
+              className="w-6 h-6 rounded hover:bg-red-500 hover:text-white transition-colors text-slate-500 dark:text-slate-400 flex items-center justify-center"
               title="关闭"
-            >✕</button>
+            >
+              <X size={12} />
+            </button>
           </div>
         </div>
       )}

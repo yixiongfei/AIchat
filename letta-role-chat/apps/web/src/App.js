@@ -1,6 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import { useRef, useState, useCallback } from "react";
-import { RefreshCw, Moon, Sun, X } from "lucide-react";
+import { useRef, useState, useCallback, useEffect } from "react";
+import { RefreshCw, Moon, Sun, X, Maximize2, Minimize2 } from "lucide-react";
 import { RoleList } from "./components/RoleList";
 import { RoleEditor } from "./components/RoleEditor";
 import { ChatWindow } from "./components/ChatWindow";
@@ -18,9 +18,19 @@ import { api } from "./services/api";
 function AppInner() {
     // 检测 Electron 环境（需要在其他 hooks 之前）
     const isElectron = !!window.electronAPI?.isElectron;
+    const [isMaximized, setIsMaximized] = useState(false);
+    // 监听 Electron 窗口最大化状态变化
+    useEffect(() => {
+        if (!isElectron)
+            return;
+        const api = window.electronAPI;
+        api?.onMaximizedChanged?.((maximized) => {
+            setIsMaximized(maximized);
+        });
+    }, [isElectron]);
     const isMobile = useIsMobile(768);
     const { isDark, toggleTheme } = useTheme();
-    useLive2D(isMobile);
+    useLive2D(isMobile, isElectron && isMaximized);
     const { width: sidebarWidth, startResize } = useResizableSidebar({
         storageKey: "sidebarWidth",
         defaultWidth: 280,
@@ -72,7 +82,7 @@ function AppInner() {
     const refreshChatList = useCallback(() => {
         setChatListKey((k) => k + 1);
     }, []);
-    return (_jsxs("div", { className: "flex flex-col h-full min-h-0 overflow-hidden font-sans bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100", children: [isElectron && (_jsxs("div", { className: "shrink-0 h-8 flex items-center justify-between px-2 bg-slate-100 dark:bg-slate-900 select-none", style: { WebkitAppRegion: "drag" }, children: [_jsx("span", { className: "text-xs text-slate-400 dark:text-slate-500 pl-1", children: "Letta Chat" }), _jsxs("div", { className: "flex items-center gap-1", style: { WebkitAppRegion: "no-drag" }, children: [_jsx("button", { onClick: () => window.electronAPI?.minimize(), className: "w-6 h-6 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-slate-500 dark:text-slate-400 text-xs flex items-center justify-center", title: "\u6700\u5C0F\u5316", children: "\u2500" }), _jsx("button", { onClick: () => window.electronAPI?.close(), className: "w-6 h-6 rounded hover:bg-red-500 hover:text-white transition-colors text-slate-500 dark:text-slate-400 text-xs flex items-center justify-center", title: "\u5173\u95ED", children: "\u2715" })] })] })), _jsxs("div", { className: "flex flex-1 overflow-hidden", children: [isMobile && sidebarOpen && (_jsx("div", { className: "fixed inset-0 bg-black/50 z-40 md:hidden", onClick: () => setSidebarOpen(false) })), _jsxs("div", { className: `
+    return (_jsxs("div", { className: "flex flex-col h-full min-h-0 overflow-hidden font-sans bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100", children: [isElectron && (_jsxs("div", { className: "shrink-0 h-8 flex items-center justify-between px-2 bg-slate-100 dark:bg-slate-900 select-none", style: { WebkitAppRegion: "drag" }, children: [_jsx("span", { className: "text-xs text-slate-400 dark:text-slate-500 pl-1", children: "Letta Chat" }), _jsxs("div", { className: "flex items-center gap-1", style: { WebkitAppRegion: "no-drag" }, children: [_jsx("button", { onClick: () => window.electronAPI?.minimize(), className: "w-6 h-6 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-slate-500 dark:text-slate-400 flex items-center justify-center", title: "\u6700\u5C0F\u5316", children: _jsx("svg", { width: "10", height: "1", viewBox: "0 0 10 1", children: _jsx("rect", { width: "10", height: "1", fill: "currentColor" }) }) }), _jsx("button", { onClick: () => window.electronAPI?.maximize(), className: "w-6 h-6 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-slate-500 dark:text-slate-400 flex items-center justify-center", title: isMaximized ? "还原" : "最大化", children: isMaximized ? _jsx(Minimize2, { size: 12 }) : _jsx(Maximize2, { size: 12 }) }), _jsx("button", { onClick: () => window.electronAPI?.close(), className: "w-6 h-6 rounded hover:bg-red-500 hover:text-white transition-colors text-slate-500 dark:text-slate-400 flex items-center justify-center", title: "\u5173\u95ED", children: _jsx(X, { size: 12 }) })] })] })), _jsxs("div", { className: "flex flex-1 overflow-hidden", children: [isMobile && sidebarOpen && (_jsx("div", { className: "fixed inset-0 bg-black/50 z-40 md:hidden", onClick: () => setSidebarOpen(false) })), _jsxs("div", { className: `
           shrink-0 flex flex-col border-r border-slate-200 bg-slate-50
           dark:border-slate-800 dark:bg-slate-900/40
           transition-all duration-300 ease-in-out
