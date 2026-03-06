@@ -1,6 +1,11 @@
-const API_BASE_URL = "/api";
+// Electron 生产模式（file:// 协议）没有 Vite proxy，需要用绝对地址
+const isElectron = !!(window as any).electronAPI?.isElectron;
+const isFileProtocol = window.location.protocol === 'file:';
+const API_BASE_URL = (isElectron && isFileProtocol)
+  ? "http://localhost:3001/api"
+  : "/api";
 
-import type { Chat, ChatsResponse, Message, MessagesResponse } from "../types";
+import type { Chat, ChatsResponse, Message, MessagesResponse, Role, DeleteResult } from "../types";
 
 /** 文本附件信息（发送时携带完整内容） */
 export interface AttachmentInfo {
@@ -66,9 +71,9 @@ export const api = {
     }));
   },
 
-  async createRole(role: { 
-    name: string; 
-    persona: string; 
+  async createRole(role: {
+    name: string;
+    persona: string;
     human: string;
     voice?: string;
     speed?: number;
@@ -76,16 +81,16 @@ export const api = {
     style?: string;
     avatarBase64?: string;
   }) {
-    return request(`${API_BASE_URL}/roles`, {
+    return request<Role>(`${API_BASE_URL}/roles`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(role),
     });
   },
 
-  async updateRole(roleId: string, role: { 
-    name?: string; 
-    persona?: string; 
+  async updateRole(roleId: string, role: {
+    name?: string;
+    persona?: string;
     human?: string;
     voice?: string;
     speed?: number;
@@ -93,7 +98,7 @@ export const api = {
     style?: string;
     avatarBase64?: string | undefined;
   }) {
-    return request(`${API_BASE_URL}/roles/${roleId}`, {
+    return request<Role>(`${API_BASE_URL}/roles/${roleId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(role),
@@ -105,15 +110,15 @@ export const api = {
   },
 
   async getHistory(roleId: string) {
-    return request(`${API_BASE_URL}/roles/${roleId}/history`);
+    return request<Message[]>(`${API_BASE_URL}/roles/${roleId}/history`);
   },
 
   async deleteHistory(roleId: string) {
-    return request(`${API_BASE_URL}/messages/${roleId}`, { method: 'DELETE' });
+    return request<DeleteResult>(`${API_BASE_URL}/messages/${roleId}`, { method: 'DELETE' });
   },
 
   async deleteMessage(messageId: string) {
-    return request(`${API_BASE_URL}/messages/message/${messageId}`, { method: 'DELETE' });
+    return request<DeleteResult>(`${API_BASE_URL}/messages/message/${messageId}`, { method: 'DELETE' });
   },
 
   async deleteAudio(fileName: string) {

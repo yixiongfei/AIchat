@@ -2,11 +2,14 @@
   "name": "@letta-role-chat/desktop",
   "version": "1.0.0",
   "description": "Letta Chat Desktop",
+  "author": "Letta Chat Team",
   "main": "dist/main.js",
   "scripts": {
     "dev": "tsc & electron dist/main.js --dev",
-    "build": "tsc && electron-builder",
-    "compile": "tsc"
+    "compile": "tsc",
+    "build:web": "cd ../web && npm run build",
+    "build:desktop": "tsc && electron-builder --win",
+    "build": "npm run build:web && npm run build:desktop"
   },
   "dependencies": {
     "@nut-tree-fork/nut-js": "^4.2.6",

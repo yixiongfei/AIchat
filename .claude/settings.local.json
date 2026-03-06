@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker compose down)",
+      "Bash(docker compose up -d)",
+      "Bash(node -e \"const p=require\\(''./package.json''\\); console.log\\(''build script:'', p.scripts?.build || ''NONE''\\)\")",
+      "Bash(npx tsc)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npm run build)",
+      "Bash(npx electron-builder --win)",
+      "Bash(node -e \":*)",
+      "Bash(npx electron-builder --win --config.win.sign=null)",
+      "Bash(set CSC_IDENTITY_AUTO_DISCOVERY=false)",
+      "Bash(set CSC_LINK=)",
+      "Bash(npx electron-builder --win --dir)",
+      "Bash(dir \"C:\\\\Users\\\\yi.xiongfei\\\\AppData\\\\Local\\\\electron-builder\\\\Cache\\\\winCodeSign\")",
+      "Bash(dir \"C:\\\\Users\\\\yi.xiongfei\\\\AppData\\\\Local\\\\electron-builder\\\\Cache\\\\winCodeSign\\\\834792019\\\\windows-10\" /b)",
+      "Bash(set WIN_CSC_LINK=)",
+      "Bash(set ELECTRON_BUILDER_CACHE=C:Usersyi.xiongfeiAppDataLocalelectron-builderCache)",
+      "Bash(npx asar pack dist releasewin-unpackedresourcesapp.asar)"
+    ]
+  }
+}

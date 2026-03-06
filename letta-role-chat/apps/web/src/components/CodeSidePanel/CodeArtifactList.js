@@ -1,0 +1,9 @@
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { Trash2, FolderOpen } from "lucide-react";
+import CodeArtifactItem from "./CodeArtifactItem";
+export default function CodeArtifactList({ artifacts, activeId, onSelect, onRemove, onClearAll, }) {
+    if (artifacts.length === 0) {
+        return (_jsxs("div", { className: "flex flex-col items-center justify-center h-full p-8 text-slate-500 dark:text-slate-400", children: [_jsx(FolderOpen, { size: 48, className: "mb-4 text-slate-400/70 dark:text-slate-500/70" }), _jsx("p", { className: "text-sm", children: "\u6682\u65E0\u4EE3\u7801\u5757" }), _jsx("p", { className: "text-xs mt-1 text-slate-400/80 dark:text-slate-500/70", children: "\u6253\u5F00\u957F\u4EE3\u7801\u65F6\u4F1A\u81EA\u52A8\u6DFB\u52A0\u5230\u8FD9\u91CC" })] }));
+    }
+    return (_jsxs("div", { className: "flex flex-col h-full", children: [_jsxs("div", { className: "shrink-0 px-4 py-3 flex items-center justify-between border-b border-slate-200/70 dark:border-slate-800/50 bg-white/70 dark:bg-slate-900/40", children: [_jsxs("span", { className: "text-sm text-slate-500 dark:text-slate-400", children: [artifacts.length, " \u4E2A\u4EE3\u7801\u5757"] }), _jsxs("button", { type: "button", onClick: onClearAll, className: "flex items-center gap-1.5 px-2 py-1 rounded-md text-xs text-slate-500 hover:text-red-500 hover:bg-red-100 transition dark:text-slate-400 dark:hover:bg-red-500/10", title: "\u6E05\u7A7A\u6240\u6709", children: [_jsx(Trash2, { size: 14 }), _jsx("span", { children: "\u6E05\u7A7A" })] })] }), _jsx("div", { className: "flex-1 overflow-y-auto p-3 space-y-2", children: artifacts.map((artifact) => (_jsx(CodeArtifactItem, { artifact: artifact, isActive: artifact.id === activeId, onClick: () => onSelect(artifact.id), onRemove: () => onRemove(artifact.id) }, artifact.id))) })] }));
+}

@@ -6,4 +6,5 @@ export type {
   Chat,
   ChatsResponse,
   MessagesResponse,
+  DeleteResult,
 } from '../../../../packages/shared/src';

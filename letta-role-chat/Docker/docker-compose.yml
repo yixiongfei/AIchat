@@ -25,6 +25,12 @@ services:
       TEMP_AUDIO_DIR: /app/temp_audio
     restart: unless-stopped
     command: sh -c "npm ci && npm run dev"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3001/api/roles"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
 
   web:
     image: node:20-alpine
@@ -39,9 +45,16 @@ services:
     environment:
       VITE_PROXY_TARGET: http://letta-api:3001
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     restart: unless-stopped
     command: sh -c "npm ci && npm run dev -- --host 0.0.0.0 --port 5173"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:5173"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
 
 volumes:
   api_node_modules:

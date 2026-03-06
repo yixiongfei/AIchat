@@ -21,6 +21,8 @@ import type { Chat } from "./types";
 import { api } from "./services/api";
 
 function AppInner() {
+  // 检测 Electron 环境（需要在其他 hooks 之前）
+  const isElectron = !!(window as any).electronAPI?.isElectron;
   const isMobile = useIsMobile(768);
   const { isDark, toggleTheme } = useTheme();
   useLive2D(isMobile);
@@ -43,8 +45,8 @@ function AppInner() {
     updateRole,
   } = useRoles();
 
-  // 移动端侧边栏开关
-  const [sidebarOpen, setSidebarOpen] = useState(!isMobile);
+  // 移动端 / Electron 桌面端侧边栏默认关闭
+  const [sidebarOpen, setSidebarOpen] = useState(!isMobile && !isElectron);
 
   // RoleEditor
   const [isEditorOpen, setIsEditorOpen] = useState(false);
@@ -91,8 +93,7 @@ function AppInner() {
     setChatListKey((k) => k + 1);
   }, []);
 
-  // 检测 Electron 环境
-  const isElectron = !!(window as any).electronAPI?.isElectron;
+
 
   return (
     <div className="flex flex-col h-full min-h-0 overflow-hidden font-sans bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">

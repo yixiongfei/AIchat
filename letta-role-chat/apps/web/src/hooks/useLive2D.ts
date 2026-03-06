@@ -2,9 +2,12 @@
 import { useEffect } from "react";
 
 export default function useLive2D(isMobile: boolean) {
+  const isElectron = !!(window as any).electronAPI?.isElectron;
+
   useEffect(() => {
-    if (isMobile) {
-      // 移动端：移除 Live2D 相关元素
+    // Electron 桌面端或移动端：隐藏 Live2D
+    if (isMobile || isElectron) {
+      // 移除 Live2D 相关元素
       const script = document.getElementById("live2d-autoload");
       if (script) script.remove();
 
@@ -27,7 +30,7 @@ export default function useLive2D(isMobile: boolean) {
       return;
     }
 
-    // 桌面端：移除隐藏样式
+    // Web 桌面端：移除隐藏样式
     const hideStyle = document.getElementById("live2d-mobile-hide");
     if (hideStyle) hideStyle.remove();
 
@@ -51,5 +54,5 @@ export default function useLive2D(isMobile: boolean) {
       const widget = document.getElementById("live2d-widget");
       if (widget) widget.remove();
     };
-  }, [isMobile]);
+  }, [isMobile, isElectron]);
 }

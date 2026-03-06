@@ -5,6 +5,11 @@ copyright: Copyright 2024
 directories:
   output: release
 
+# asar 打包（native 模块需要 unpack）
+asar: true
+asarUnpack:
+  - "node_modules/@nut-tree-fork/**"
+
 files:
   - dist/**/*
   - package.json
@@ -16,16 +21,16 @@ extraResources:
     filter:
       - "**/*"
 
+# 跳过代码签名（个人/内部使用不需要）
 win:
+  signingHashAlgorithms: []
+  sign: null
   target:
-    - target: nsis
+    - target: portable
       arch:
         - x64
   icon: icon.ico
 
-nsis:
-  oneClick: false
-  allowToChangeInstallationDirectory: true
-  createDesktopShortcut: true
-  createStartMenuShortcut: true
-  shortcutName: Letta Chat
+# portable 免安装版（双击直接运行，不需要安装）
+portable:
+  artifactName: "LettaChat-${version}-portable.exe"
