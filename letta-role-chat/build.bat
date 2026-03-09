@@ -209,10 +209,10 @@ echo  ==========================================
 echo.
 echo  Starting Letta Chat...
 
-:: Launch EXE (detached)
-start "" "!EXE_FILE!"
+:: Launch EXE (fully detached, closing this window won't kill it)
+powershell -Command "Start-Process -FilePath '!EXE_FILE!'"
 
 echo.
 echo  Letta Chat is running!
-echo  Press any key to close this window.
-pause >nul
+echo.
+timeout /t 3 /nobreak >nul
