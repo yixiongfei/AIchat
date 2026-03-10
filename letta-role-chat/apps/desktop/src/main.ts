@@ -355,8 +355,7 @@ const LIVE2D_OVERLAY_HTML = `<!DOCTYPE html>
     width: 100%;
     height: 100%;
   }
-  /* 确保 Live2D 容器透明 */
-  #live2d-widget {
+  #waifu {
     background: transparent !important;
   }
 </style>
@@ -364,11 +363,17 @@ const LIVE2D_OVERLAY_HTML = `<!DOCTYPE html>
 <body>
 <script src="https://cdn.jsdelivr.net/gh/yixiongfei/live2d-widget@master/dist/autoload.js"><\/script>
 <script>
-  // 等待 Live2D 元素加载完成后设置鼠标穿透
-  const observer = new MutationObserver(() => {
-    const canvas = document.querySelector('canvas[id^="live2d"]');
-    const widget = document.getElementById('live2d-widget');
-    if (canvas || widget) {
+  // live2d-widget DOM structure:
+  //   #waifu-toggle  (show/hide button)
+  //   #waifu         (main container)
+  //     #waifu-tips   (bubble)
+  //     #waifu-canvas > canvas#live2d
+  //     #waifu-tool   (toolbar)
+
+  // Wait for widget to load
+  var observer = new MutationObserver(function() {
+    var waifu = document.getElementById('waifu');
+    if (waifu) {
       setupMouseHandler();
       observer.disconnect();
     }
@@ -376,31 +381,28 @@ const LIVE2D_OVERLAY_HTML = `<!DOCTYPE html>
   observer.observe(document.body, { childList: true, subtree: true });
 
   function setupMouseHandler() {
-    // 鼠标移动时检测是否在 Live2D 元素上
-    document.addEventListener('mousemove', (e) => {
-      const el = document.elementFromPoint(e.clientX, e.clientY);
-      if (el && (el.tagName === 'CANVAS' || el.closest('#live2d-widget'))) {
+    document.addEventListener('mousemove', function(e) {
+      var el = document.elementFromPoint(e.clientX, e.clientY);
+      if (el && (el.tagName === 'CANVAS' || el.closest('#waifu'))) {
         window.live2dAPI && window.live2dAPI.setIgnoreMouseEvents(false);
       } else {
         window.live2dAPI && window.live2dAPI.setIgnoreMouseEvents(true);
       }
     });
-
-    // 鼠标离开窗口时恢复穿透
-    document.addEventListener('mouseleave', () => {
+    document.addEventListener('mouseleave', function() {
       window.live2dAPI && window.live2dAPI.setIgnoreMouseEvents(true);
     });
   }
 
-  // 双击 Live2D 恢复主窗口
-  document.addEventListener('dblclick', (e) => {
-    const el = document.elementFromPoint(e.clientX, e.clientY);
-    if (el && (el.tagName === 'CANVAS' || el.closest('#live2d-widget'))) {
+  // Double-click to restore main window
+  document.addEventListener('dblclick', function(e) {
+    var el = document.elementFromPoint(e.clientX, e.clientY);
+    if (el && (el.tagName === 'CANVAS' || el.closest('#waifu'))) {
       window.live2dAPI && window.live2dAPI.restoreMainWindow();
     }
   });
 
-  // 全屏光标追踪：接收主进程转发的光标坐标，派发合成 mousemove 事件
+  // Cursor tracking
   if (window.live2dAPI && window.live2dAPI.onCursorMove) {
     window.live2dAPI.onCursorMove(function(pos) {
       document.dispatchEvent(new MouseEvent('mousemove', {
@@ -410,6 +412,7 @@ const LIVE2D_OVERLAY_HTML = `<!DOCTYPE html>
       }));
     });
   }
+
 <\/script>
 </body>
 </html>`;
@@ -468,20 +471,25 @@ function createLive2DWindow(): void {
 
   // 启动全屏光标追踪轮询
   startCursorPoller();
+
 }
 
-/** 启动光标位置轮询，将屏幕光标坐标转发给 Live2D 渲染进程 */
+/** 启动光标位置轮询，将屏幕光标坐标转发给 Live2D 渲染进程（每 60 秒一次快照） */
 function startCursorPoller(): void {
   stopCursorPoller();
-  cursorPoller = setInterval(() => {
-    if (!live2dWindow || live2dWindow.isDestroyed()) return;
-    const cursor = screen.getCursorScreenPoint();
-    const bounds = live2dWindow.getBounds();
-    live2dWindow.webContents.send("cursor-move", {
-      x: cursor.x - bounds.x,
-      y: cursor.y - bounds.y,
-    });
-  }, 50);
+  // 立即发送一次当前位置
+  sendCursorPosition();
+  cursorPoller = setInterval(() => sendCursorPosition(), 60000);
+}
+
+function sendCursorPosition(): void {
+  if (!live2dWindow || live2dWindow.isDestroyed()) return;
+  const cursor = screen.getCursorScreenPoint();
+  const bounds = live2dWindow.getBounds();
+  live2dWindow.webContents.send("cursor-move", {
+    x: cursor.x - bounds.x,
+    y: cursor.y - bounds.y,
+  });
 }
 
 /** 停止光标位置轮询 */

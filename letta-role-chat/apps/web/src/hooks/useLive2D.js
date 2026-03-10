@@ -25,11 +25,11 @@ export default function useLive2D(isMobile, forceShow = false) {
                 script.async = true;
                 document.body.appendChild(script);
             }
-            // 确保 Live2D 元素可见
-            const widget = document.getElementById("live2d-widget");
+            // 确保 Live2D 元素可见（widget 实际 ID 是 #waifu）
+            const widget = document.getElementById("waifu");
             if (widget)
                 widget.style.display = "";
-            const tips = document.getElementById("live2d-tips");
+            const tips = document.getElementById("waifu-tips");
             if (tips)
                 tips.style.display = "";
             return;
@@ -40,18 +40,19 @@ export default function useLive2D(isMobile, forceShow = false) {
             const script = document.getElementById("live2d-autoload");
             if (script)
                 script.remove();
-            const widget = document.getElementById("live2d-widget");
+            const widget = document.getElementById("waifu");
             if (widget)
                 widget.remove();
-            const tips = document.getElementById("live2d-tips");
-            if (tips)
-                tips.remove();
+            const toggle = document.getElementById("waifu-toggle");
+            if (toggle)
+                toggle.remove();
             const style = document.createElement("style");
             style.id = "live2d-mobile-hide";
             style.textContent = `
-        #live2d-widget,
-        #live2d-tips,
-        canvas[id^="live2d"] {
+        #waifu,
+        #waifu-toggle,
+        #waifu-tips,
+        canvas#live2d {
           display: none !important;
         }
       `;
@@ -77,9 +78,12 @@ export default function useLive2D(isMobile, forceShow = false) {
             const existing = document.getElementById("live2d-autoload");
             if (existing)
                 existing.remove();
-            const widget = document.getElementById("live2d-widget");
+            const widget = document.getElementById("waifu");
             if (widget)
                 widget.remove();
+            const toggle = document.getElementById("waifu-toggle");
+            if (toggle)
+                toggle.remove();
         };
     }, [isMobile, isElectron, forceShow]);
 }
