@@ -12,6 +12,8 @@ import {
   screen,
 } from "electron";
 import * as path from "path";
+import * as fs from "fs";
+import * as os from "os";
 import { translateText } from "./translate";
 import { keyboard, Key, sleep } from "@nut-tree-fork/nut-js";
 
@@ -38,6 +40,8 @@ const COOLDOWN_MS = 600;        // 动画结束后冷却时间(ms)，防止连�
 // ========================================
 
 let mainWindow: BrowserWindow | null = null;
+let live2dWindow: BrowserWindow | null = null;
+let cursorPoller: ReturnType<typeof setInterval> | null = null;  // Live2D 全屏光标追踪轮询
 let tray: Tray | null = null;
 let isQuitting = false;
 
@@ -113,6 +117,10 @@ function createWindow(): void {
 
   // 窗口移动结束后检测是否贴边
   mainWindow.on("moved", () => checkEdgeDock());
+
+  // 最小化时显示 Live2D 桌面宠物，恢复时销毁
+  mainWindow.on("minimize", () => createLive2DWindow());
+  mainWindow.on("restore", () => destroyLive2DWindow());
 }
 
 // ========================================
@@ -322,8 +330,175 @@ function restoreFromDock(): void {
   }
 
   undock();
+  destroyLive2DWindow();
   mainWindow?.show();
   mainWindow?.focus();
+}
+
+// ========================================
+// Live2D 桌面宠物（最小化时显示）
+// ========================================
+
+const LIVE2D_WIDTH = 350;
+const LIVE2D_HEIGHT = 400;
+
+const LIVE2D_OVERLAY_HTML = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: transparent !important;
+    overflow: hidden;
+    width: 100%;
+    height: 100%;
+  }
+  /* 确保 Live2D 容器透明 */
+  #live2d-widget {
+    background: transparent !important;
+  }
+</style>
+</head>
+<body>
+<script src="https://cdn.jsdelivr.net/gh/yixiongfei/live2d-widget@master/dist/autoload.js"><\/script>
+<script>
+  // 等待 Live2D 元素加载完成后设置鼠标穿透
+  const observer = new MutationObserver(() => {
+    const canvas = document.querySelector('canvas[id^="live2d"]');
+    const widget = document.getElementById('live2d-widget');
+    if (canvas || widget) {
+      setupMouseHandler();
+      observer.disconnect();
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  function setupMouseHandler() {
+    // 鼠标移动时检测是否在 Live2D 元素上
+    document.addEventListener('mousemove', (e) => {
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      if (el && (el.tagName === 'CANVAS' || el.closest('#live2d-widget'))) {
+        window.live2dAPI && window.live2dAPI.setIgnoreMouseEvents(false);
+      } else {
+        window.live2dAPI && window.live2dAPI.setIgnoreMouseEvents(true);
+      }
+    });
+
+    // 鼠标离开窗口时恢复穿透
+    document.addEventListener('mouseleave', () => {
+      window.live2dAPI && window.live2dAPI.setIgnoreMouseEvents(true);
+    });
+  }
+
+  // 双击 Live2D 恢复主窗口
+  document.addEventListener('dblclick', (e) => {
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    if (el && (el.tagName === 'CANVAS' || el.closest('#live2d-widget'))) {
+      window.live2dAPI && window.live2dAPI.restoreMainWindow();
+    }
+  });
+
+  // 全屏光标追踪：接收主进程转发的光标坐标，派发合成 mousemove 事件
+  if (window.live2dAPI && window.live2dAPI.onCursorMove) {
+    window.live2dAPI.onCursorMove(function(pos) {
+      document.dispatchEvent(new MouseEvent('mousemove', {
+        clientX: pos.x,
+        clientY: pos.y,
+        bubbles: true
+      }));
+    });
+  }
+<\/script>
+</body>
+</html>`;
+
+/** 获取 Live2D 覆盖层 HTML 文件路径（写入临时文件） */
+function getLive2DHTMLPath(): string {
+  const p = path.join(os.tmpdir(), "letta-live2d-overlay.html");
+  fs.writeFileSync(p, LIVE2D_OVERLAY_HTML, "utf-8");
+  return p;
+}
+
+/** 创建 Live2D 桌面宠物窗口 */
+function createLive2DWindow(): void {
+  if (live2dWindow) return; // 已存在
+
+  const display = screen.getPrimaryDisplay();
+  const { width: screenW, height: screenH } = display.workAreaSize;
+  const { x: workX, y: workY } = display.workArea;
+
+  live2dWindow = new BrowserWindow({
+    width: LIVE2D_WIDTH,
+    height: LIVE2D_HEIGHT,
+    x: workX + screenW - LIVE2D_WIDTH,
+    y: workY + screenH - LIVE2D_HEIGHT,
+    transparent: true,
+    frame: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    hasShadow: false,
+    focusable: false,
+    webPreferences: {
+      preload: path.join(__dirname, "preload-live2d.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  // 初始设置为鼠标穿透（透明区域不拦截鼠标事件）
+  live2dWindow.setIgnoreMouseEvents(true, { forward: true });
+
+  try {
+    const htmlPath = getLive2DHTMLPath();
+    live2dWindow.loadFile(htmlPath);
+  } catch (err) {
+    console.error("Failed to create Live2D overlay:", err);
+    live2dWindow?.destroy();
+    live2dWindow = null;
+    return;
+  }
+
+  live2dWindow.on("closed", () => {
+    live2dWindow = null;
+    stopCursorPoller();
+  });
+
+  // 启动全屏光标追踪轮询
+  startCursorPoller();
+}
+
+/** 启动光标位置轮询，将屏幕光标坐标转发给 Live2D 渲染进程 */
+function startCursorPoller(): void {
+  stopCursorPoller();
+  cursorPoller = setInterval(() => {
+    if (!live2dWindow || live2dWindow.isDestroyed()) return;
+    const cursor = screen.getCursorScreenPoint();
+    const bounds = live2dWindow.getBounds();
+    live2dWindow.webContents.send("cursor-move", {
+      x: cursor.x - bounds.x,
+      y: cursor.y - bounds.y,
+    });
+  }, 50);
+}
+
+/** 停止光标位置轮询 */
+function stopCursorPoller(): void {
+  if (cursorPoller) {
+    clearInterval(cursorPoller);
+    cursorPoller = null;
+  }
+}
+
+/** 销毁 Live2D 桌面宠物窗口 */
+function destroyLive2DWindow(): void {
+  stopCursorPoller();
+  if (live2dWindow) {
+    live2dWindow.destroy();
+    live2dWindow = null;
+  }
 }
 
 // ========================================
@@ -448,6 +623,24 @@ function setupIPC(): void {
     mainWindow.setAlwaysOnTop(!isTop);
     mainWindow.webContents.send("always-on-top-changed", !isTop);
   });
+
+  // Live2D 桌面宠物 IPC
+  ipcMain.on("live2d-restore", () => {
+    destroyLive2DWindow();
+    if (mainWindow) {
+      mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+  ipcMain.on("live2d-set-ignore-mouse", (_event, ignore: boolean) => {
+    if (!live2dWindow) return;
+    if (ignore) {
+      live2dWindow.setIgnoreMouseEvents(true, { forward: true });
+    } else {
+      live2dWindow.setIgnoreMouseEvents(false);
+    }
+  });
 }
 
 // ========================================
@@ -474,7 +667,7 @@ if (!gotLock) {
     console.log(`Letta Chat Desktop | ${IS_DEV ? "DEV" : "PROD"} | API: ${API_BASE}`);
   });
 
-  app.on("before-quit", () => { isQuitting = true; });
+  app.on("before-quit", () => { isQuitting = true; destroyLive2DWindow(); });
   app.on("will-quit", () => { globalShortcut.unregisterAll(); stopMousePoller(); clearLeaveTimer(); });
   app.on("window-all-closed", () => { /* tray keeps alive */ });
   app.on("activate", () => { if (!mainWindow) createWindow(); });
